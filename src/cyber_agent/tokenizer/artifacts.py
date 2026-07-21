@@ -51,8 +51,10 @@ def write_candidate_artifacts(
     corpus: CorpusPlan,
     *,
     fixture_artifact: bool,
+    target_directory: Path | None = None,
+    manifest_extra: dict[str, Any] | None = None,
 ) -> tuple[Path, dict[str, Any]]:
-    target = config.candidate_directory
+    target = target_directory or config.candidate_directory
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = Path(tempfile.mkdtemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent))
     try:
@@ -120,6 +122,7 @@ def write_candidate_artifacts(
             "training_documents": corpus.manifest_documents(),
             "fixture_artifact": fixture_artifact,
             "production_ready": False,
+            **(manifest_extra or {}),
         }
         atomic_write_json(temporary / "training_manifest.json", manifest)
         _publish_directory(temporary, target)
