@@ -23,3 +23,9 @@ data/splits/*
 !data/splits/.gitkeep
 data/reports/*
 !data/reports/.gitkeep
+
+# Generated tokenizer candidates and explicitly exported local finals.
+artifacts/tokenizers/candidates/*
+!artifacts/tokenizers/candidates/.gitkeep
+artifacts/tokenizers/final/*
+!artifacts/tokenizers/final/.gitkeep

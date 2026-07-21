@@ -10,7 +10,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Cyber Agent contributors" }]
-dependencies = []
+dependencies = [
+    "tokenizers>=0.22,<1",
+]
 
 [project.optional-dependencies]
 test = ["pytest>=8.0,<9"]

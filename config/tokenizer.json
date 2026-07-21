@@ -1,0 +1,46 @@
+{
+  "algorithm": "byte_level_bpe",
+  "vocabulary_size": 24000,
+  "candidate_vocabulary_sizes": [16000, 24000, 32000],
+  "minimum_frequency": 2,
+  "special_tokens": [
+    "<|pad|>",
+    "<|bos|>",
+    "<|eos|>",
+    "<|unk|>",
+    "<|system|>",
+    "<|user|>",
+    "<|assistant|>",
+    "<|tool_call|>",
+    "<|tool_result|>",
+    "<|terminal|>",
+    "<|document|>",
+    "<|code|>"
+  ],
+  "seed": 42,
+  "maximum_document_characters": 200000,
+  "category_sampling_weights": {
+    "general": 1.0,
+    "code": 1.0,
+    "linux": 1.0,
+    "networking": 1.0,
+    "cybersecurity": 1.0,
+    "terminal": 1.0
+  },
+  "category_sampling_limits": {
+    "general": 100000,
+    "code": 100000,
+    "linux": 100000,
+    "networking": 100000,
+    "cybersecurity": 100000,
+    "terminal": 100000
+  },
+  "source_sampling_limits": {
+    "*": 100000
+  },
+  "training_split_path": "data/splits/train.jsonl",
+  "output_directory": "artifacts/tokenizers",
+  "unicode_normalization": "none",
+  "maximum_token_length": 64
+}
+
