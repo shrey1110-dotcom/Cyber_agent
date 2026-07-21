@@ -7,3 +7,19 @@ dist/
 *.egg-info/
 audit.jsonl
 .DS_Store
+
+# Generated training-data artifacts. Keep only directory sentinels in Git.
+data/raw/*
+!data/raw/.gitkeep
+data/extracted/*
+!data/extracted/.gitkeep
+data/cleaned/*
+!data/cleaned/.gitkeep
+data/rejected/*
+!data/rejected/.gitkeep
+data/manifests/*
+!data/manifests/.gitkeep
+data/splits/*
+!data/splits/.gitkeep
+data/reports/*
+!data/reports/.gitkeep

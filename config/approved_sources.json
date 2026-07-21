@@ -1,0 +1,126 @@
+{
+  "policy_version": 1,
+  "sources": [
+    {
+      "source_name": "sample",
+      "homepage": "local://fixtures/sample_corpus",
+      "data_location": "fixtures/sample_corpus/manifest.jsonl",
+      "license": "CC0-1.0",
+      "allowed_use": "Phase 2 pipeline testing and local model-training fixtures.",
+      "attribution_requirements": "None; retain source manifest for auditability.",
+      "category": "cybersecurity",
+      "adapter": "local_manifest",
+      "enabled": true,
+      "notes": "Tiny synthetic fixture corpus committed with the project."
+    },
+    {
+      "source_name": "fineweb-edu-placeholder",
+      "homepage": "https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu",
+      "data_location": "manual://fineweb-edu-reviewed-sample",
+      "license": "ODC-BY-1.0",
+      "allowed_use": "Disabled pending per-record provenance and underlying-content license review.",
+      "attribution_requirements": "Dataset attribution plus any underlying document requirements.",
+      "category": "general",
+      "adapter": "placeholder",
+      "enabled": false,
+      "notes": "Dataset metadata alone does not establish training rights for every web document."
+    },
+    {
+      "source_name": "nist-publications-placeholder",
+      "homepage": "https://www.nist.gov/publications",
+      "data_location": "manual://nist-reviewed-publications",
+      "license": "LicenseRef-NIST-PD",
+      "allowed_use": "Disabled until each publication's notices and third-party material are reviewed.",
+      "attribution_requirements": "Preserve publication title, authors, NIST identifier, URL, and notices.",
+      "category": "cybersecurity",
+      "adapter": "placeholder",
+      "enabled": false,
+      "notes": "United States government works may contain separately licensed material."
+    },
+    {
+      "source_name": "mitre-attack-placeholder",
+      "homepage": "https://attack.mitre.org/",
+      "data_location": "manual://mitre-attack-release",
+      "license": "Apache-2.0",
+      "allowed_use": "Disabled until a release snapshot and required notices are selected.",
+      "attribution_requirements": "Retain MITRE ATT&CK attribution and Apache-2.0 notices.",
+      "category": "cybersecurity",
+      "adapter": "placeholder",
+      "enabled": false,
+      "notes": "Confirm the license on the exact release before enabling."
+    },
+    {
+      "source_name": "cwe-placeholder",
+      "homepage": "https://cwe.mitre.org/",
+      "data_location": "manual://cwe-reviewed-release",
+      "license": "REVIEW_REQUIRED",
+      "allowed_use": "Disabled pending review of the exact CWE release terms.",
+      "attribution_requirements": "Preserve CWE and MITRE attribution plus release-specific notices.",
+      "category": "cybersecurity",
+      "adapter": "placeholder",
+      "enabled": false,
+      "notes": "Do not infer permission from public visibility."
+    },
+    {
+      "source_name": "linux-documentation-placeholder",
+      "homepage": "https://docs.kernel.org/",
+      "data_location": "manual://linux-docs-reviewed-files",
+      "license": "REVIEW_REQUIRED",
+      "allowed_use": "Disabled; licenses must be established per selected file or collection.",
+      "attribution_requirements": "Retain file-level SPDX identifiers, authorship, and source URL.",
+      "category": "linux",
+      "adapter": "placeholder",
+      "enabled": false,
+      "notes": "Linux documentation licensing varies."
+    },
+    {
+      "source_name": "bash-documentation-placeholder",
+      "homepage": "https://www.gnu.org/software/bash/manual/",
+      "data_location": "manual://bash-documentation-reviewed-sample",
+      "license": "GFDL-1.3-or-later",
+      "allowed_use": "Disabled pending copyleft and attribution review.",
+      "attribution_requirements": "Retain GNU, author, license, invariant-section, and source notices.",
+      "category": "terminal",
+      "adapter": "placeholder",
+      "enabled": false,
+      "notes": "Review GFDL obligations before enabling."
+    },
+    {
+      "source_name": "python-documentation-placeholder",
+      "homepage": "https://docs.python.org/3/",
+      "data_location": "manual://python-docs-versioned-snapshot",
+      "license": "PSF-2.0",
+      "allowed_use": "Disabled until a versioned snapshot and attribution bundle are prepared.",
+      "attribution_requirements": "Retain PSF license, copyright notices, version, and URLs.",
+      "category": "code",
+      "adapter": "placeholder",
+      "enabled": false,
+      "notes": "Enable only reviewed files from a pinned documentation release."
+    },
+    {
+      "source_name": "git-documentation-placeholder",
+      "homepage": "https://git-scm.com/docs",
+      "data_location": "manual://git-docs-reviewed-snapshot",
+      "license": "GPL-2.0-only",
+      "allowed_use": "Disabled pending copyleft and version-specific review.",
+      "attribution_requirements": "Retain Git project, authorship, GPL notices, and source URLs.",
+      "category": "terminal",
+      "adapter": "placeholder",
+      "enabled": false,
+      "notes": "Confirm the exact source-tree license and documentation exceptions."
+    },
+    {
+      "source_name": "permissive-code-placeholder",
+      "homepage": "local://reviewed-code-imports",
+      "data_location": "manual://per-file-spdx-manifest",
+      "license": "MULTIPLE-SPDX-REQUIRED",
+      "allowed_use": "Disabled until each Python, Bash, PowerShell, JSON, YAML, or Dockerfile sample has a verified permissive license.",
+      "attribution_requirements": "Retain repository, revision, file path, copyright, SPDX license, and notices.",
+      "category": "code",
+      "adapter": "placeholder",
+      "enabled": false,
+      "notes": "No repository or file is approved merely because it is publicly readable."
+    }
+  ]
+}
+
