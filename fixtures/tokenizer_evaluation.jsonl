@@ -1,0 +1,12 @@
+{"name":"english-prose","evaluation_group":"english_prose","category":"general","source_name":"evaluation-fixture","text":"Review the listening service, record the evidence, and use the approved change process before modifying a production system."}
+{"name":"journalctl-command","evaluation_group":"bash","category":"terminal","source_name":"evaluation-fixture","text":"journalctl -u ssh --since \"2 hours ago\""}
+{"name":"cybersecurity-identifiers","evaluation_group":"cybersecurity_identifiers","category":"cybersecurity","source_name":"evaluation-fixture","text":"CVE-2026-12345\nCWE-79\nT1059.004"}
+{"name":"file-paths","evaluation_group":"paths","category":"terminal","source_name":"evaluation-fixture","text":"/var/log/auth.log\n../../etc/passwd\n~/.ssh/id_ed25519"}
+{"name":"network-addresses","evaluation_group":"network_addresses","category":"networking","source_name":"evaluation-fixture","text":"192.168.1.10:443\n2001:db8::1"}
+{"name":"python-code","evaluation_group":"python","category":"code","source_name":"evaluation-fixture","text":"def validate_path(path: Path) -> bool:\n    return path.resolve().is_relative_to(WORKSPACE)"}
+{"name":"bash-command","evaluation_group":"bash","category":"code","source_name":"evaluation-fixture","text":"grep -R \"failed password\" /var/log && printf '%s\\n' done | sort >> audit.log"}
+{"name":"tool-json","evaluation_group":"json","category":"code","source_name":"evaluation-fixture","text":"{\n  \"type\": \"tool_call\",\n  \"tool\": \"check_ports\",\n  \"arguments\": {}\n}"}
+{"name":"service-yaml","evaluation_group":"yaml","category":"code","source_name":"evaluation-fixture","text":"service:\n  name: ssh\n  ports:\n    - 22\n  enabled: true"}
+{"name":"authentication-log","evaluation_group":"logs","category":"cybersecurity","source_name":"evaluation-fixture","text":"Failed password for invalid user admin from 192.168.1.25 port 51234 ssh2"}
+{"name":"unicode-text","evaluation_group":"unicode","category":"general","source_name":"evaluation-fixture","text":"Résumé integrity check — 東京 — 🔐 preserves valid UTF-8 bytes."}
+
