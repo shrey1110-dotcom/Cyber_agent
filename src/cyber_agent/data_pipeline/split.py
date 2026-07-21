@@ -89,8 +89,12 @@ def run_split(config: PipelineConfig, *, seed: int | None = None, force: bool = 
         "validation": config.paths.splits / "validation.jsonl",
         "test": config.paths.splits / "test.jsonl",
     }
+    per_split_manifest_paths = {
+        name: config.paths.manifests / f"{name}_manifest.jsonl"
+        for name in ("train", "validation", "test")
+    }
     manifest_path = config.paths.manifests / "split_manifest.jsonl"
-    outputs = [*split_paths.values(), manifest_path]
+    outputs = [*split_paths.values(), *per_split_manifest_paths.values(), manifest_path]
     input_fingerprint = fingerprint(
         [input_path],
         {"seed": selected_seed, "proportions": config.split_proportions},
@@ -106,7 +110,11 @@ def run_split(config: PipelineConfig, *, seed: int | None = None, force: bool = 
     for name, path in split_paths.items():
         atomic_write_jsonl(path, (document.to_dict() for document in split_map[name]))
     atomic_write_jsonl(manifest_path, (assignment.to_dict() for assignment in assignments))
+    for name, path in per_split_manifest_paths.items():
+        atomic_write_jsonl(
+            path,
+            (assignment.to_dict() for assignment in assignments if assignment.split == name),
+        )
     counts = {name: len(documents_in_split) for name, documents_in_split in split_map.items()}
     write_stage_marker(config.paths.manifests, "split", input_fingerprint, outputs, counts)
     return {"stage": "split", "status": "complete", "seed": selected_seed, **counts, "outputs": [str(path) for path in outputs]}
-

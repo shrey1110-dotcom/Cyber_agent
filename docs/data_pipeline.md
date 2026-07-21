@@ -105,4 +105,3 @@ disabled. Before enabling them, resolve at least these questions:
 
 This document is an engineering control, not legal advice. The generated summary
 repeats unresolved source assumptions so they remain visible during every review.
-

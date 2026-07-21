@@ -44,6 +44,8 @@ def test_end_to_end_fixture_processing_and_reports(pipeline_project: Path) -> No
     assert '    completed = subprocess.run(' in code_document["text"]
     assert (config.paths.reports / "dataset_summary.json").exists()
     assert (config.paths.reports / "license_counts.json").exists()
+    for split_name in ("train", "validation", "test"):
+        assert (config.paths.manifests / f"{split_name}_manifest.jsonl").exists()
 
 
 def test_cli_returns_nonzero_for_unallowlisted_source(pipeline_project: Path, capsys) -> None:
@@ -58,4 +60,3 @@ def test_cli_returns_nonzero_for_unallowlisted_source(pipeline_project: Path, ca
     )
     assert exit_code == 1
     assert "not present in the allowlist" in capsys.readouterr().err
-
