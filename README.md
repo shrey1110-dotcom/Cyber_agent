@@ -11,6 +11,12 @@ The default business security floor is maintained in
 revocable user-granted permissions—including selected file access—without
 allowing the model to expand its own privileges.
 
+Phase 2 adds a local, reproducible, legally auditable training-data pipeline.
+See [the data-pipeline guide](docs/data_pipeline.md) for source approval,
+licensing, cleaning, secret filtering, deduplication, splitting, resumability,
+commands, and unresolved assumptions. It exports untokenized JSONL only; tokenizer
+and model training remain out of scope.
+
 The implemented flow is:
 
 ```text
