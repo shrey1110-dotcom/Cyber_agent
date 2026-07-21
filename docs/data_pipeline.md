@@ -52,9 +52,11 @@ wants to regenerate it. Generated data is ignored by Git.
 3. Add the exact license identifier to `config/license_policy.json`. Set it to
    `review_required` until legal review says the intended training use and
    obligations are acceptable. Record whether attribution is required.
-4. Add all required fields to `config/approved_sources.json`: `source_name`,
-   `homepage`, `data_location`, `license`, `allowed_use`,
-   `attribution_requirements`, and `category`. Keep `enabled` false during review.
+4. Add the full review record to `config/approved_sources.json`: exact release,
+   homepage/download location, publisher, license and evidence URL, allowed use,
+   redistribution status, attribution, per-record license field, review status,
+   reviewer/time, categories, risks, and notes. Keep `enabled` false and status
+   `pending` during review.
 5. Prepare a small local JSONL manifest. Every line must contain `path`,
    `source_url`, `license`, `retrieved_at`, `language`, `media_type`, and useful
    provenance metadata. Paths must stay below the manifest directory.
@@ -105,3 +107,6 @@ disabled. Before enabling them, resolve at least these questions:
 
 This document is an engineering control, not legal advice. The generated summary
 repeats unresolved source assumptions so they remain visible during every review.
+
+Phase 3.5 acquisition, budgets, balancing, immutable snapshots, and exact-release
+approval are documented in [the pilot corpus guide](pilot_corpus.md).

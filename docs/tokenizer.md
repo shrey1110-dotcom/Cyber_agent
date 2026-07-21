@@ -181,10 +181,14 @@ logits, and convert these lists to MLX arrays in the model/training layer.
   length, and the approximately 50M total parameter budget.
 - Tune source/category quotas, minimum frequency, maximum token length, and
   cybersecurity/code balance using audited corpus statistics.
-- Define the final trusted prompt serialization and which component alone may
-  enable special-token parsing.
+- Revisit trusted serialization only through a versioned format;
+  `TrustedPromptSerializer` is now the sole control-token inserter.
 - Decide whether a reviewed small final tokenizer is versioned or all generated
   artifacts remain outside Git, and define artifact signing/release retention.
 
 The fixture tokenizer is test infrastructure, not a production language-model
 component.
+
+Frozen-snapshot candidates, 50M model-budget estimates, evidence-gated
+selection, confirmed export, provenance, and canonical trusted serialization
+are documented in [the Phase 3.5 guide](pilot_corpus.md).
