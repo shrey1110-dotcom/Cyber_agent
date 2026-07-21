@@ -17,6 +17,7 @@ test = ["pytest>=8.0,<9"]
 
 [project.scripts]
 cyber-agent = "cyber_agent.cli:main"
+cyber-data = "cyber_agent.data_pipeline.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -24,4 +25,3 @@ where = ["src"]
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["tests"]
-

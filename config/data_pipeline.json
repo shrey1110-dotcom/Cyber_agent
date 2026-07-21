@@ -2,7 +2,7 @@
   "minimum_document_characters": 80,
   "maximum_document_characters": 200000,
   "minimum_quality_score": 0.55,
-  "near_duplicate_hamming_distance": 10,
+  "near_duplicate_hamming_distance": 12,
   "split_proportions": {
     "train": 0.98,
     "validation": 0.01,
@@ -11,4 +11,3 @@
   "default_seed": 42,
   "sensitive_data_action": "reject"
 }
-

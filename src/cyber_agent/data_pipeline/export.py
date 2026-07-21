@@ -124,3 +124,54 @@ def write_stage_marker(
         },
     )
 
+
+def run_export(config: Any, *, force: bool = False) -> dict[str, Any]:
+    """Create dataset, source, rejection, and attribution manifests."""
+    # Import locally to keep the low-level atomic I/O helpers dependency-light.
+    from cyber_agent.data_pipeline.sources import SourceRegistry
+
+    split_paths = [config.paths.splits / f"{name}.jsonl" for name in ("train", "validation", "test")]
+    rejection_paths = [config.paths.rejected / "ingest.jsonl", config.paths.rejected / "clean.jsonl"]
+    duplicate_path = config.paths.reports / "duplicate_report.jsonl"
+    dataset_path = config.paths.cleaned / "dataset.jsonl"
+    source_manifest_path = config.paths.manifests / "source_manifest.jsonl"
+    rejection_manifest_path = config.paths.manifests / "rejection_manifest.jsonl"
+    outputs = [dataset_path, source_manifest_path, rejection_manifest_path, duplicate_path]
+    input_fingerprint = fingerprint(
+        [*split_paths, *rejection_paths, duplicate_path],
+        config.fingerprint_payload(),
+    )
+    if not force and stage_is_current(config.paths.manifests, "export", input_fingerprint, outputs):
+        return {"stage": "export", "status": "skipped", "outputs": [str(path) for path in outputs]}
+
+    documents = [record for path in split_paths for record in read_jsonl(path)]
+    documents.sort(key=lambda record: record["document_id"])
+    rejections = [record for path in rejection_paths for record in read_jsonl(path)]
+    rejections.sort(key=lambda record: (record["document_id"], record["stage"]))
+    counts_by_source: dict[str, int] = {}
+    for document in documents:
+        counts_by_source[document["source_name"]] = counts_by_source.get(document["source_name"], 0) + 1
+    registry = SourceRegistry.load(config.paths)
+    used_sources = []
+    for source in registry.all_sources():
+        if source.source_name not in counts_by_source:
+            continue
+        used_sources.append(
+            {
+                "source_name": source.source_name,
+                "homepage": source.homepage,
+                "data_location": source.data_location,
+                "license": source.license,
+                "allowed_use": source.allowed_use,
+                "attribution_requirements": source.attribution_requirements,
+                "category": source.category,
+                "document_count": counts_by_source[source.source_name],
+            }
+        )
+    atomic_write_jsonl(dataset_path, documents)
+    atomic_write_jsonl(source_manifest_path, used_sources)
+    atomic_write_jsonl(rejection_manifest_path, rejections)
+    counts = {"documents": len(documents), "sources": len(used_sources), "rejections": len(rejections)}
+    write_stage_marker(config.paths.manifests, "export", input_fingerprint, outputs, counts)
+    return {"stage": "export", "status": "complete", **counts, "outputs": [str(path) for path in outputs]}
+
