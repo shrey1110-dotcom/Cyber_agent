@@ -83,7 +83,8 @@ def _validate_no_leakage(
 
 def run_split(config: PipelineConfig, *, seed: int | None = None, force: bool = False) -> dict[str, Any]:
     selected_seed = config.default_seed if seed is None else seed
-    input_path = config.paths.cleaned / "deduplicated.jsonl"
+    balanced_path = config.paths.cleaned / "balanced.jsonl"
+    input_path = balanced_path if balanced_path.exists() else config.paths.cleaned / "deduplicated.jsonl"
     split_paths = {
         "train": config.paths.splits / "train.jsonl",
         "validation": config.paths.splits / "validation.jsonl",

@@ -3,12 +3,38 @@
 from __future__ import annotations
 
 from collections import Counter
+import hashlib
 from typing import Any
 
 from cyber_agent.data_pipeline.config import PipelineConfig
+from cyber_agent.data_pipeline.balance import estimate_pre_tokenizer_tokens
 from cyber_agent.data_pipeline.export import atomic_write_json, read_jsonl
 from cyber_agent.data_pipeline.schemas import utc_now
 from cyber_agent.data_pipeline.sources import SourceRegistry
+
+
+def representative_samples(config: PipelineConfig, *, seed: int, per_category: int = 2) -> dict[str, list[dict[str, Any]]]:
+    source_path = config.paths.cleaned / "balanced.jsonl"
+    if not source_path.exists():
+        source_path = config.paths.cleaned / "deduplicated.jsonl"
+    documents = read_jsonl(source_path)
+    categories = sorted({str(document["category"]) for document in documents})
+    result: dict[str, list[dict[str, Any]]] = {}
+    for category in categories:
+        candidates = sorted(
+            (document for document in documents if document["category"] == category),
+            key=lambda document: hashlib.sha256(f"{seed}:{document['document_id']}".encode("utf-8")).hexdigest(),
+        )
+        result[category] = [
+            {
+                "document_id": document["document_id"],
+                "source_name": document["source_name"],
+                "license": document["license"],
+                "text_preview": document["text"][:500],
+            }
+            for document in candidates[:per_category]
+        ]
+    return result
 
 
 def run_report(config: PipelineConfig) -> dict[str, Any]:
@@ -38,12 +64,17 @@ def run_report(config: PipelineConfig) -> dict[str, Any]:
             "reason": source.notes or source.allowed_use,
         }
         for source in registry.all_sources()
-        if not source.enabled or config.license_policy.rule_for(source.license).status != "allowed"  # type: ignore[union-attr]
+        if not source.enabled
+        or not source.is_approved
+        or config.license_policy.rule_for(source.license) is None
+        or config.license_policy.rule_for(source.license).status != "allowed"  # type: ignore[union-attr]
     ]
     summary = {
         "schema_version": 1,
         "generated_at": utc_now(),
         "accepted_documents": len(documents),
+        "raw_documents": len(read_jsonl(config.paths.raw / "documents.jsonl")),
+        "estimated_pre_tokenizer_tokens": sum(estimate_pre_tokenizer_tokens(document["text"]) for document in documents),
         "total_characters": sum(len(document["text"]) for document in documents),
         "average_quality_score": round(
             sum(float(document["quality_score"]) for document in documents) / max(1, len(documents)),
@@ -68,6 +99,16 @@ def run_report(config: PipelineConfig) -> dict[str, Any]:
             "policy_version": config.license_policy.policy_version,
             "unresolved_source_assumptions": unresolved,
         },
+        "dataset_mode": config.dataset_mode.to_dict(),
+        "sources_requiring_review_before_open_weight_release": sorted(
+            source.source_name for source in registry.all_sources()
+            if source.source_name in by_source and (
+                source.license == "REVIEW_REQUIRED"
+                or config.license_policy.rule_for(source.license) is None
+                or config.license_policy.rule_for(source.license).status != "allowed"  # type: ignore[union-attr]
+                or not config.dataset_mode.release_cleared
+            )
+        ),
         "quality_scoring": {
             "minimum_score": config.minimum_quality_score,
             "method": "Equal-weight length, token diversity, readability, English-marker, and structure components after hard rejection checks.",
