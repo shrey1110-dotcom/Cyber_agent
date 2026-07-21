@@ -1,0 +1,2 @@
+Linux process inspection should start with a clear question and the least privileged tool that can answer it. Process identifiers, parent relationships, executable paths, and open file descriptors can help explain unexpected behavior. Results describe a moment in time, so investigators should record timestamps and avoid changing the system before necessary evidence has been collected.
+

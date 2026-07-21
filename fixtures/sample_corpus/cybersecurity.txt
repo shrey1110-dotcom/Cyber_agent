@@ -1,0 +1,2 @@
+Incident response begins by preserving evidence and recording a reliable timeline. Analysts should identify affected systems, isolate confirmed threats, and collect volatile data with approved tools. Every action should be logged so another reviewer can reproduce the investigation. Credentials observed during analysis must be treated as sensitive and rotated through the authorized process rather than copied into notes.
+

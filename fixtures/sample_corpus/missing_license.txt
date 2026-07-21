@@ -1,0 +1,2 @@
+This document intentionally omits license metadata from the source manifest. Its prose is readable and long enough for the quality checks, but the ingest stage must reject it before its contents can enter any accepted pipeline artifact.
+
