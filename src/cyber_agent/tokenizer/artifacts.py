@@ -119,7 +119,7 @@ def write_candidate_artifacts(
             "tokenizer_artifact_hashes": artifact_hashes,
             "training_documents": corpus.manifest_documents(),
             "fixture_artifact": fixture_artifact,
-            "production_ready": False if fixture_artifact else None,
+            "production_ready": False,
         }
         atomic_write_json(temporary / "training_manifest.json", manifest)
         _publish_directory(temporary, target)

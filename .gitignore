@@ -29,3 +29,4 @@ artifacts/tokenizers/candidates/*
 !artifacts/tokenizers/candidates/.gitkeep
 artifacts/tokenizers/final/*
 !artifacts/tokenizers/final/.gitkeep
+artifacts/tokenizers/comparison_report.json

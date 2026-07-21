@@ -1,4 +1,4 @@
-# cyber-agent — Phase 1 safe agent shell
+# cyber-agent — safe agent, data, and tokenizer foundations
 
 `cyber-agent` is the policy and sandbox layer for a future, locally trained
 decoder-only cybersecurity model. Phase 1 deliberately contains no language
@@ -14,8 +14,15 @@ allowing the model to expand its own privileges.
 Phase 2 adds a local, reproducible, legally auditable training-data pipeline.
 See [the data-pipeline guide](docs/data_pipeline.md) for source approval,
 licensing, cleaning, secret filtering, deduplication, splitting, resumability,
-commands, and unresolved assumptions. It exports untokenized JSONL only; tokenizer
-and model training remain out of scope.
+commands, and unresolved assumptions. It exports untokenized JSONL only.
+
+Phase 3 adds deterministic, train-split-only byte-level BPE tokenizer training,
+evaluation, comparison, loading, and explicit final export. See
+[the tokenizer guide](docs/tokenizer.md). The checked-in configuration defaults
+to a 24K vocabulary and supports 16K/24K/32K production candidates, but the tiny
+fixture corpus must use an explicitly labeled small tokenizer. No transformer,
+pretraining loop, pretrained weights, remote dataset, or hosted LLM integration
+is included.
 
 The implemented flow is:
 
@@ -117,7 +124,8 @@ class ModelBackend(Protocol):
         ...
 ```
 
-Phase 2 can implement the protocol and swap only the construction site:
+A later model phase can implement the protocol and swap only the construction
+site:
 
 ```python
 backend = MLXCyberModelBackend(
@@ -126,12 +134,12 @@ backend = MLXCyberModelBackend(
 agent = Agent(backend=backend, tools=registry, logger=logger)
 ```
 
-`MLXCyberModelBackend.generate` will serialize the conversation into the
-custom model's chat/prompt format, run local MLX inference, and return exactly
-one action JSON string. The parser, policy, Docker runtime, tool-result format,
-and loop do not depend on MLX and need no redesign. The eventual backend must
-use the model trained from random initialization; the temporary deterministic
-backend must not be shipped as the final model.
+`MLXCyberModelBackend.generate` will load Phase 3's final tokenizer, serialize
+the conversation into the custom model's chat/prompt format, run local MLX
+inference, and return exactly one action JSON string. The parser, policy, Docker
+runtime, tool-result format, and loop do not depend on MLX and need no redesign.
+The eventual backend must use the model trained from random initialization; the
+temporary deterministic backend must not be shipped as the final model.
 
 ## Security controls
 
