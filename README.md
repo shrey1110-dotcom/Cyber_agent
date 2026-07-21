@@ -6,6 +6,11 @@ model weights, MLX training code, pretrained model, hosted-model SDK, or
 external model API call. The included deterministic backend is temporary test
 infrastructure.
 
+The default business security floor is maintained in
+[`SECURITY.md`](SECURITY.md). Future phases may add explicit, granular,
+revocable user-granted permissions—including selected file access—without
+allowing the model to expand its own privileges.
+
 The implemented flow is:
 
 ```text
