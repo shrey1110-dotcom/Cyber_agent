@@ -159,12 +159,25 @@ def run_export(config: Any, *, force: bool = False) -> dict[str, Any]:
         used_sources.append(
             {
                 "source_name": source.source_name,
+                "exact_release_or_version": source.exact_release_or_version,
                 "homepage": source.homepage,
+                "publisher": source.publisher,
                 "data_location": source.data_location,
                 "license": source.license,
+                "license_evidence_url": source.license_evidence_url,
                 "allowed_use": source.allowed_use,
+                "redistribution_status": source.redistribution_status,
                 "attribution_requirements": source.attribution_requirements,
                 "category": source.category,
+                "review_status": source.review_status,
+                "reviewed_by": source.reviewed_by,
+                "reviewed_at": source.reviewed_at,
+                "retrieved_at": source.retrieved_at,
+                "download_location": source.download_location,
+                "local_research_source": source.local_research_source,
+                "release_cleared": config.dataset_mode.release_cleared,
+                "weight_publication_allowed": config.dataset_mode.weight_publication_allowed,
+                "dataset_redistribution_allowed": config.dataset_mode.dataset_redistribution_allowed,
                 "document_count": counts_by_source[source.source_name],
             }
         )
@@ -174,4 +187,3 @@ def run_export(config: Any, *, force: bool = False) -> dict[str, Any]:
     counts = {"documents": len(documents), "sources": len(used_sources), "rejections": len(rejections)}
     write_stage_marker(config.paths.manifests, "export", input_fingerprint, outputs, counts)
     return {"stage": "export", "status": "complete", **counts, "outputs": [str(path) for path in outputs]}
-

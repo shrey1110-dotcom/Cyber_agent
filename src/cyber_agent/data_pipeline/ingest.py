@@ -56,9 +56,32 @@ def run_ingest(
 
     accepted: list[RawDocument] = []
     rejected: list[RejectionRecord] = []
+    budget_end_reasons: dict[str, int] = {}
     for source, manifest in zip(sources, manifests, strict=True):
         source_accepted, source_rejected = _ingest_manifest(config, source, manifest)
-        accepted.extend(source_accepted)
+        source_accepted.sort(key=lambda record: record.document_id)
+        source_limit = config.pilot_budget.maximum_documents_per_source
+        global_remaining = max(0, config.pilot_budget.maximum_raw_documents - len(accepted))
+        keep_count = min(len(source_accepted), source_limit, global_remaining)
+        accepted.extend(source_accepted[:keep_count])
+        for record in source_accepted[keep_count:]:
+            reason = (
+                "maximum_raw_documents"
+                if global_remaining <= min(len(source_accepted), source_limit)
+                else "maximum_documents_per_source"
+            )
+            budget_end_reasons[reason] = budget_end_reasons.get(reason, 0) + 1
+            rejected.append(
+                RejectionRecord(
+                    document_id=record.document_id,
+                    source_name=record.source_name,
+                    stage="ingest",
+                    reason=f"pilot collection stopped at {reason}",
+                    reason_codes=(reason,),
+                    rejected_at=utc_now(),
+                    metadata={"pilot_budget_exclusion": True},
+                )
+            )
         rejected.extend(source_rejected)
 
     accepted.sort(key=lambda record: record.document_id)
@@ -67,7 +90,14 @@ def run_ingest(
     atomic_write_jsonl(rejected_path, (record.to_dict() for record in rejected))
     counts = {"accepted": len(accepted), "rejected": len(rejected), "sources": len(sources)}
     write_stage_marker(config.paths.manifests, "ingest", input_fingerprint, outputs, counts)
-    return {"stage": "ingest", "status": "complete", **counts, "outputs": [str(path) for path in outputs]}
+    return {
+        "stage": "ingest",
+        "status": "complete",
+        **counts,
+        "collection_end_reason": max(budget_end_reasons, key=budget_end_reasons.get) if budget_end_reasons else "input_exhausted",
+        "budget_exclusions": dict(sorted(budget_end_reasons.items())),
+        "outputs": [str(path) for path in outputs],
+    }
 
 
 def _ingest_manifest(
@@ -119,8 +149,16 @@ def _load_entry(
     document_id: str,
 ) -> RawDocument:
     source_url = _required_string(entry, "source_url")
+    source_release = _required_string(entry, "source_release")
+    if source_release != source.exact_release_or_version:
+        raise ValueError(
+            f"record release does not match approved release: {source_release} != {source.exact_release_or_version}"
+        )
     license_identifier = _required_string(entry, "license")
-    config.license_policy.require_allowed(license_identifier)
+    config.license_policy.require_usable(
+        license_identifier,
+        local_research_only=config.dataset_mode.local_research_only,
+    )
     if source.license != "MULTIPLE-SPDX-REQUIRED" and license_identifier != source.license:
         raise ValueError(f"record license does not match approved source license: {license_identifier}")
     relative_path = Path(_required_string(entry, "path"))
@@ -143,6 +181,16 @@ def _load_entry(
     metadata = entry.get("metadata", {})
     if not isinstance(metadata, dict):
         raise ValueError("metadata must be an object")
+    if category == "code":
+        for field_name in ("repository", "revision"):
+            value = metadata.get(field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"code record is missing per-record {field_name} metadata")
+        declared = metadata.get("detected_licenses", [license_identifier])
+        if not isinstance(declared, list) or not declared or any(not isinstance(item, str) for item in declared):
+            raise ValueError("code record has ambiguous per-record license metadata")
+        if set(declared) != {license_identifier}:
+            raise ValueError("code record has conflicting per-record licenses")
     return RawDocument(
         document_id=document_id,
         raw_text=raw_text,
@@ -154,7 +202,19 @@ def _load_entry(
         retrieved_at=retrieved_at,
         media_type=media_type,
         attribution_requirements=source.attribution_requirements,
-        metadata={**metadata, "source_homepage": source.homepage, "allowed_use": source.allowed_use},
+        metadata={
+            **metadata,
+            "source_homepage": source.homepage,
+            "source_release": source.exact_release_or_version,
+            "publisher": source.publisher,
+            "license_evidence_url": source.license_evidence_url,
+            "record_path": str(relative_path),
+            "allowed_use": source.allowed_use,
+            "local_research_only": config.dataset_mode.local_research_only,
+            "source_retrieved_at": source.retrieved_at or retrieved_at,
+            "release_cleared": config.dataset_mode.release_cleared,
+            "weight_publication_allowed": config.dataset_mode.weight_publication_allowed,
+        },
     )
 
 
@@ -193,4 +253,3 @@ def _safe_rejection(
         rejected_at=utc_now(),
         metadata={"manifest_line": line_number},
     )
-
