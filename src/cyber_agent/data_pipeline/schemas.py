@@ -38,6 +38,16 @@ def _require_nonempty(value: str, field_name: str) -> None:
         raise ValueError(f"{field_name} must be a non-empty string")
 
 
+def _require_iso8601(value: str, field_name: str) -> None:
+    _require_nonempty(value, field_name)
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{field_name} must include a timezone")
+
+
 @dataclass(frozen=True, slots=True)
 class RawDocument:
     document_id: str
@@ -55,6 +65,7 @@ class RawDocument:
     def __post_init__(self) -> None:
         for name in ("document_id", "source_name", "source_url", "license", "retrieved_at"):
             _require_nonempty(getattr(self, name), name)
+        _require_iso8601(self.retrieved_at, "retrieved_at")
         if self.category not in CATEGORIES:
             raise ValueError(f"unsupported category: {self.category}")
         if self.language != "en":
@@ -93,6 +104,7 @@ class Document:
             "content_hash",
         ):
             _require_nonempty(getattr(self, name), name)
+        _require_iso8601(self.retrieved_at, "retrieved_at")
         if self.category not in CATEGORIES:
             raise ValueError(f"unsupported category: {self.category}")
         if self.language != "en":
@@ -154,4 +166,3 @@ class SplitAssignment:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-

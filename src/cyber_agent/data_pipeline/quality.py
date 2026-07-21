@@ -56,6 +56,9 @@ def assess_quality(text: str, category: Category, config: PipelineConfig) -> Qua
         reasons.append("mostly_navigation")
     if sum(text.casefold().count(phrase) for phrase in SPAM_PHRASES) >= 2:
         reasons.append("obvious_spam")
+    vowel_ratio = sum(any(vowel in token for vowel in "aeiouy") for token in tokens) / max(1, len(tokens))
+    if category != "code" and len(tokens) >= 12 and vowel_ratio < 0.25:
+        reasons.append("generated_garbage")
 
     printable_ratio = sum(character.isprintable() or character in "\n\t" for character in text) / max(1, length)
     if printable_ratio < 0.95:
@@ -87,4 +90,3 @@ def assess_quality(text: str, category: Category, config: PipelineConfig) -> Qua
     accepted = not hard_reasons
     summary = "accepted" if accepted else ", ".join(hard_reasons)
     return QualityAssessment(accepted, score, hard_reasons, summary, components)
-

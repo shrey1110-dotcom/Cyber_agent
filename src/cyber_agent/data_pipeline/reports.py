@@ -7,6 +7,7 @@ from typing import Any
 
 from cyber_agent.data_pipeline.config import PipelineConfig
 from cyber_agent.data_pipeline.export import atomic_write_json, read_jsonl
+from cyber_agent.data_pipeline.schemas import utc_now
 from cyber_agent.data_pipeline.sources import SourceRegistry
 
 
@@ -41,6 +42,7 @@ def run_report(config: PipelineConfig) -> dict[str, Any]:
     ]
     summary = {
         "schema_version": 1,
+        "generated_at": utc_now(),
         "accepted_documents": len(documents),
         "total_characters": sum(len(document["text"]) for document in documents),
         "average_quality_score": round(
@@ -66,6 +68,10 @@ def run_report(config: PipelineConfig) -> dict[str, Any]:
             "policy_version": config.license_policy.policy_version,
             "unresolved_source_assumptions": unresolved,
         },
+        "quality_scoring": {
+            "minimum_score": config.minimum_quality_score,
+            "method": "Equal-weight length, token diversity, readability, English-marker, and structure components after hard rejection checks.",
+        },
     }
     atomic_write_json(config.paths.reports / "dataset_summary.json", summary)
     atomic_write_json(
@@ -73,4 +79,3 @@ def run_report(config: PipelineConfig) -> dict[str, Any]:
         {"policy_version": config.license_policy.policy_version, "document_counts": dict(sorted(by_license.items()))},
     )
     return summary
-
