@@ -1,0 +1,6 @@
+{
+  "dataset_mode": "local_research_only",
+  "release_cleared": false,
+  "weight_publication_allowed": false,
+  "dataset_redistribution_allowed": false
+}
