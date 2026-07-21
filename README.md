@@ -24,6 +24,22 @@ fixture corpus must use an explicitly labeled small tokenizer. No transformer,
 pretraining loop, pretrained weights, remote dataset, or hosted LLM integration
 is included.
 
+Phase 3.5 adds exact-release source reviews, bounded resumable acquisition,
+safe archives, configurable pilot budgets, deterministic balancing, immutable
+snapshots, frozen-snapshot tokenizer candidates, model-budget analysis,
+protected export, checksums/attestations, and injection-safe trusted prompt
+serialization. See [the pilot corpus guide](docs/pilot_corpus.md). External
+sources remain pending and disabled; demonstrations use synthetic fixtures.
+
+The local research pilot milestone adds a separately labeled private-data mode,
+conservative 1M–3M-token budgets, configured official/source archives,
+deterministic safe tool examples, source materializers, balancing before
+splitting, publication blocking, manual accepted-sample inspection, and
+train-only tokenizer pilot aliases. See
+[the local research pilot guide](docs/local_research_pilot.md). Network corpus
+acquisition requires `--confirm-download`; downloaded data and generated
+artifacts are never committed or pushed.
+
 The implemented flow is:
 
 ```text
