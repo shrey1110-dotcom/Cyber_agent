@@ -38,3 +38,21 @@ def pipeline_project(tmp_path: Path) -> Path:
         (project / "data" / name).mkdir(parents=True)
     return project
 
+
+@pytest.fixture
+def tokenizer_project(pipeline_project: Path) -> Path:
+    from cyber_agent.data_pipeline.config import PipelineConfig
+    from cyber_agent.data_pipeline.deduplicate import run_deduplicate
+    from cyber_agent.data_pipeline.export import run_export
+    from cyber_agent.data_pipeline.ingest import run_ingest
+    from cyber_agent.data_pipeline.normalize import run_clean
+    from cyber_agent.data_pipeline.split import run_split
+
+    config = PipelineConfig.load(pipeline_project)
+    run_ingest(config, ["sample"], force=True)
+    run_clean(config, force=True)
+    run_deduplicate(config, force=True)
+    run_split(config, seed=42, force=True)
+    run_export(config, force=True)
+    return pipeline_project
+
