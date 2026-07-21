@@ -1,0 +1,6 @@
+To the extent possible under law, the Cyber Agent contributors waive all
+copyright and related or neighboring rights in the synthetic files contained
+in this fixture directory under CC0 1.0 Universal.
+
+This dedication applies only to the synthetic fixture files authored for this
+repository. It does not approve or make any statement about external sources.
