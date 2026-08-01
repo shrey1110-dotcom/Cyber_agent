@@ -24,6 +24,10 @@ fixture corpus must use an explicitly labeled small tokenizer. No transformer,
 pretraining loop, pretrained weights, remote dataset, or hosted LLM integration
 is included.
 
+For a continuation-oriented description of the current implementation, local
+generated state, file responsibilities, invariants, and remaining production
+work, read the [engineering handoff](docs/HANDOFF.md).
+
 Phase 3.5 adds exact-release source reviews, bounded resumable acquisition,
 safe archives, configurable pilot budgets, deterministic balancing, immutable
 snapshots, frozen-snapshot tokenizer candidates, model-budget analysis,
