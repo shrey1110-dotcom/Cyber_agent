@@ -234,8 +234,7 @@ class SourceRegistry:
         errors = source.validate(license_policy)
         if errors:
             raise ValueError("; ".join(errors))
-        locally_materialized = source.local_research_source and self.manifest_path(source).is_file()
-        if not source.enabled and not locally_materialized:
+        if not source.enabled:
             raise ValueError(f"source is configured as a disabled placeholder: {source_name}")
         if not source.is_approved and not source.local_research_source:
             raise ValueError(f"source review status does not permit ingestion: {source_name} ({source.review_status})")
@@ -253,8 +252,7 @@ class SourceRegistry:
         errors = source.validate(license_policy)
         if errors:
             raise ValueError("; ".join(errors))
-        local_download = source.local_research_source and source.acquisition_enabled
-        if (not source.enabled or not source.is_approved) and not local_download:
+        if not source.enabled or not source.is_approved:
             raise ValueError(f"source is not approved for download: {source_name} ({source.review_status})")
         if source.adapter not in {"http_file", "http_archive", "http_archive_text", "http_stix_json", "http_cwe_xml"}:
             raise ValueError(f"source has no remote download adapter: {source_name}")
@@ -264,20 +262,28 @@ class SourceRegistry:
         return [
             self.require_ingestible(source.source_name, license_policy)
             for source in self._sources.values()
-            if source.enabled or (source.local_research_source and self.manifest_path(source).is_file())
+            if source.enabled
         ]
 
     def acquisition_sources(self, license_policy: LicensePolicy) -> list[SourceDefinition]:
         return [
             self.require_downloadable(source.source_name, license_policy)
             for source in self._sources.values()
-            if source.local_research_source and source.acquisition_enabled and source.adapter.startswith("http_")
+            if source.enabled
+            and source.is_approved
+            and source.local_research_source
+            and source.acquisition_enabled
+            and source.adapter.startswith("http_")
         ]
 
     def synthetic_sources(self) -> list[SourceDefinition]:
         return [
             source for source in self._sources.values()
-            if source.local_research_source and source.acquisition_enabled and source.adapter == "synthetic_tool_examples"
+            if source.enabled
+            and source.is_approved
+            and source.local_research_source
+            and source.acquisition_enabled
+            and source.adapter == "synthetic_tool_examples"
         ]
 
     def all_sources(self) -> list[SourceDefinition]:

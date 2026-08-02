@@ -66,6 +66,7 @@ def _language(path: Path) -> str:
         ".py": "python", ".sh": "bash", ".bash": "bash", ".go": "go",
         ".rs": "rust", ".c": "c", ".h": "c", ".cc": "cpp", ".cpp": "cpp",
         ".ps1": "powershell", ".json": "json", ".yaml": "yaml", ".yml": "yaml",
+        ".md": "markdown", ".rst": "restructuredtext", ".adoc": "asciidoc",
         ".dockerfile": "dockerfile",
     }.get(suffix, "en")
 
@@ -158,6 +159,11 @@ def _write_records(
             })
             count += 1
             estimated_tokens += tokens
+        if count == 0:
+            raise ValueError(
+                "source materialization produced no eligible records; "
+                "check the pinned release and configured path/extension filters"
+            )
         atomic_write_jsonl(temporary / "manifest.jsonl", manifest_rows)
         atomic_write_json(temporary / "materialization_report.json", {
             "schema_version": 1,

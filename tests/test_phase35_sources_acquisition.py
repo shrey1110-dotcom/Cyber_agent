@@ -41,6 +41,13 @@ def test_review_status_and_exact_release_enforcement(pipeline_project: Path) -> 
     with pytest.raises(ValueError, match="disabled placeholder|not approved"):
         registry.require_ingestible("fineweb-edu-placeholder", config.license_policy)
 
+    disabled_local = next(source for source in registry.all_sources() if source.source_name == "git-2.50.0")
+    manifest_path = registry.manifest_path(disabled_local)
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="disabled placeholder"):
+        registry.require_ingestible("git-2.50.0", config.license_policy)
+
     manifest = pipeline_project / "fixtures" / "sample_corpus" / "manifest.jsonl"
     lines = manifest.read_text(encoding="utf-8").splitlines()
     first = json.loads(lines[0])
