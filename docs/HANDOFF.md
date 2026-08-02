@@ -77,6 +77,7 @@ The observed frozen snapshots are:
 | --- | ---: | ---: | --- | --- |
 | `cyber-pilot-v1` | 4 accepted, 4 rejected | 404 | 4 / 0 / 0 | `pilot_only` |
 | `cyber-pilot-v1.v2` | 4 accepted, 4 rejected | 404 | 4 / 0 / 0 | `pilot_only` |
+| `cyber-pilot-v3` | 39 accepted, 4 rejected | 62,468 | 39 / 0 / 0 | `pilot_only` |
 
 Both snapshots are local-research-only, release-cleared is false, dataset
 redistribution is false, and model-weight publication is false. They are
@@ -92,10 +93,13 @@ tokens. They are marked as fixture artifacts, use the same frozen training
 manifest, decode exactly on the fixture evaluation set, and have zero unknown
 tokens there. Candidate comparison reports `insufficient_evidence` and makes
 no recommendation because the corpus and held-out evidence are too small.
-Those candidates were trained from the older four-document frozen snapshot,
-not from the newer 39-record `data/splits/train.jsonl` output. A new immutable
-snapshot and new candidate run are required before the current extracted data
-can affect tokenizer metrics.
+The `cyber-pilot-v1` candidates were trained from the older four-document
+snapshot. The `cyber-pilot-v3` candidates now use the newer 39-record frozen
+training manifest and have actual vocabulary size 1,003 for each requested
+16K/24K/32K candidate. They still remain fixture artifacts: the comparison
+report has 16 evaluation examples, 63,918 exact training tokens, zero unknowns,
+100% round-trip accuracy, but no recommendation because the configured minimum
+evidence is 1,000 evaluation documents and 10M estimated training tokens.
 
 ## System architecture
 
