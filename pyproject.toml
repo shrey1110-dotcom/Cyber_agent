@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Cyber Agent contributors" }]
 dependencies = [
+    "mlx>=0.30,<1",
     "tokenizers>=0.22,<1",
 ]
 
@@ -21,6 +22,7 @@ test = ["pytest>=8.0,<9"]
 cyber-agent = "cyber_agent.cli:main"
 cyber-data = "cyber_agent.data_pipeline.cli:main"
 cyber-tokenizer = "cyber_agent.tokenizer.cli:main"
+cyber-train = "cyber_agent.training.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

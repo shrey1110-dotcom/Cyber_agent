@@ -38,3 +38,7 @@ artifacts/tokenizers/final/*
 artifacts/tokenizers/comparison_report.json
 artifacts/datasets/snapshots/*
 !artifacts/datasets/snapshots/.gitkeep
+
+# Randomly initialized local model checkpoints and training metrics.
+artifacts/training/*
+!artifacts/training/.gitkeep
