@@ -12,7 +12,8 @@ part of routine maintenance.
 
 ## Current status in one paragraph
 
-Phases 1, 2, 3, and the Phase 3.5 tooling milestone are implemented. Phase 1
+Phases 1, 2, 3, 3.5, and the local Phase 4 pretraining foundation are
+implemented. Phase 1
 is a local agent shell with strict JSON actions, exactly five tools, filesystem
 policy checks, Docker-only execution, and audit logging. Phase 2 is a
 license-aware cleaning, filtering, deduplication, splitting, export, and report
@@ -21,26 +22,29 @@ provides a stable loader. Phase 3.5 adds source-review records, bounded local
 research acquisition, safe archive extraction, deterministic balancing,
 immutable snapshots, snapshot-specific tokenizer candidates, model-budget
 estimates, candidate comparison, trusted prompt serialization, and checksums.
+Phase 4 adds a local MLX decoder-only model, a train-split-only block loader,
+AdamW pretraining, immutable safetensors checkpoints, held-out evaluation, and
+an explicit pilot-training gate. It does not add model inference to the agent.
 
-The most recent local-research runs acquired ten exact, pinned, reviewed-for-
-pilot releases under separate 3M provisional-token caps: Python 3.13.14 text
-documentation, Requests v2.32.4, HTTPX 0.28.1, Black 26.5.1, Moby
-`docker-v29.0.0`, Cosign v3.0.6, FastAPI 0.115.12 English documentation, Trivy
-v0.66.0 documentation, OpenTelemetry Collector v0.153.0 documentation, and
-YARA v4.5.5 documentation. After cleaning, secret/PII filtering, and
-deduplication, `cyber-pilot-v5` contains 917 retained documents and 1,121,828
-provisional tokens. It is `pilot_only`, local-research-only, and explicitly not
-cleared for data redistribution or model-weight publication. Its 16K/24K/32K
-tokenizer candidates are valid research artifacts but have insufficient
-evidence for selection. No transformer, MLX training loop, hosted LLM
-integration, or public data release exists.
+The current local-research dataset is `cyber-pilot-v7`: 4,679 retained
+documents and 4,081,394 provisional tokens after cleaning, sensitive-data
+filtering, and deduplication. It is `pilot_only`, local-research-only, and not
+cleared for data redistribution or model-weight publication. Candidates at
+16K/24K/32K were trained only on the v7 frozen training manifest and decode
+exactly with zero unknown-token dependence. The comparison remains
+`insufficient_evidence`: the corpus is below the 10M-token threshold and has
+only 109 held-out/fixed evaluation inputs, not the required 1,000. The target
+random-initialized MLX model is `cyber-decoder-v1` (50,048,512 parameters with
+the v7 24K tokenizer). One 2,048-token pilot update succeeded and was written
+as `pilot-v7-50m-bootstrap-v1`; it is a training-mechanics checkpoint, not a
+useful or releasable model.
 
 ## Verified state at handoff
 
 The complete test suite passed after the latest acquisition/extraction changes:
 
 ```text
-102 passed in 0.78s
+106 passed in 0.77s
 ```
 
 The prior 86 Phase 1–3 tests are included in that run and still pass. The
@@ -62,18 +66,20 @@ The current extracted/materialized local data is specifically:
 
 | Stage/path | Records | Meaning |
 | --- | ---: | --- |
-| `data/raw/documents.jsonl` | 1,329 | Ingested raw records, including records later rejected. |
-| `data/extracted/documents.jsonl` | 1,256 | UTF-8/text extraction output after safe secret/PII rejection. |
-| `data/cleaned/documents.jsonl` | 950 | Normalized, quality-checked records before deduplication. |
-| `data/cleaned/deduplicated.jsonl` | 917 | One exact and 32 near duplicates removed. |
-| `data/cleaned/balanced.jsonl` | 917 | Deterministic balancing output; no records excluded by the configured caps. |
-| `data/splits/train.jsonl` | 907 | Snapshot tokenizer-training input. |
-| `data/splits/validation.jsonl` / `test.jsonl` | 3 / 7 | Held-out evaluation documents; they are not tokenizer-training input. |
+| `data/raw/documents.jsonl` | 7,221 | Ingested raw records, including records later rejected. |
+| `data/extracted/documents.jsonl` | 7,219 | UTF-8/text extraction output after safe secret/PII rejection. |
+| `data/cleaned/documents.jsonl` | 5,416 | Normalized, quality-checked records before deduplication. |
+| `data/cleaned/deduplicated.jsonl` | 4,679 | 55 exact and 682 near duplicates removed. |
+| `data/cleaned/balanced.jsonl` | 4,679 | Deterministic balancing output; no records excluded by the configured caps. |
+| `data/splits/train.jsonl` | 4,586 | Snapshot tokenizer-training input. |
+| `data/splits/validation.jsonl` / `test.jsonl` | 49 / 44 | Held-out evaluation documents; they are not tokenizer-training input. |
 
 The extracted source files live below `data/sources/<exact-source-name>/` and
 the archives plus atomic download manifests live below `data/downloads/`.
 `data/manifests/pilot_acquisition.json` records the most recent source batch;
-the local archive directory currently totals 160,246,009 downloaded bytes.
+the completed local archive directory currently totals 217,255,778 downloaded
+bytes against the configured 250,000,000-byte acquisition cap. A separate
+incomplete OPA transfer is deliberately not materialized or ingested.
 Each download manifest records checksums, final redirected domains, and the
 fact that downloaded code was not executed. A FastAPI path-prefix mismatch and
 the empty in-tree Kubernetes documentation path were detected during audit,
@@ -90,6 +96,8 @@ The observed frozen snapshots are:
 | `cyber-pilot-v3` | 39 accepted, 4 rejected | 62,468 | 39 / 0 / 0 | `pilot_only` |
 | `cyber-pilot-v4` | 636 accepted, 300 rejected | 801,556 | 630 / 2 / 4 | `pilot_only` |
 | `cyber-pilot-v5` | 917 accepted, 381 rejected | 1,121,828 | 907 / 3 / 7 | `pilot_only` |
+| `cyber-pilot-v6` | 2,671 accepted | 3,050,000 | local research snapshot | `pilot_only` |
+| `cyber-pilot-v7` | 4,679 accepted | 4,081,394 | 4,586 / 49 / 44 | `pilot_only` |
 
 Both snapshots are local-research-only, release-cleared is false, dataset
 redistribution is false, and model-weight publication is false. They are
@@ -99,15 +107,15 @@ state that existed when each snapshot was created; a future snapshot must be
 created after any input/configuration change.
 
 The latest snapshot-specific tokenizer candidates are under
-`artifacts/tokenizers/candidates/cyber-pilot-v5/16000`, `24000`, and `32000`.
+`artifacts/tokenizers/candidates/cyber-pilot-v7/16000`, `24000`, and `32000`.
 All requested sizes were produced. They use the same frozen train-manifest
 hash, stable special-token IDs (pad through code are IDs 0 through 11), exact
-decode round trips, and zero unknown-token dependence. Exact training-token
-counts are 1,212,477 (16K), 1,178,195 (24K), and 1,158,848 (32K). The held-out
-set contains only ten snapshot documents (26 evaluation inputs including fixed
-representative fixtures), so comparison is deliberately `insufficient_evidence`
-and recommends no candidate. At 512 hidden dimensions with tied embeddings,
-the vocabulary cost is 8.19M/12.29M/16.38M parameters for 16K/24K/32K.
+decode round trips, and zero unknown-token dependence. Exact v7 training-token
+counts are 4,658,198 (16K), 4,534,538 (24K), and 4,466,214 (32K); held-out
+evaluation counts are 98,124, 95,855, and 94,676 respectively. The comparison
+is deliberately `insufficient_evidence` and recommends no candidate. At 512
+hidden dimensions with tied embeddings, the vocabulary cost is
+8.19M/12.29M/16.38M parameters for 16K/24K/32K.
 
 Older fixture candidates are under
 `artifacts/tokenizers/candidates/cyber-pilot-v1/16000`, `24000`, and `32000`.
@@ -155,13 +163,15 @@ reviewed source records
   -> tokenizer candidates trained on frozen train only
   -> held-out evaluation and comparison
   -> explicit pilot/final export
-  -> future MLX model training
+  -> gated local MLX pretraining
+  -> future agent inference backend
 ```
 
-The model is intentionally not implemented. The only current model boundary is
-the `ModelBackend` protocol in `src/cyber_agent/model.py`. A future local MLX
-backend must implement that protocol and must not bypass the parser, policy,
-runtime, or audit layers.
+The random-initialized training model is implemented, but agent inference is
+not. The current runtime boundary remains the `ModelBackend` protocol in
+`src/cyber_agent/model.py`. A future local `MLXCyberModelBackend` must load a
+production-frozen checkpoint and must not bypass the parser, policy, runtime,
+or audit layers.
 
 ## Phase status
 
@@ -260,7 +270,41 @@ Not complete:
 - No real 10M–30M-token pilot has been acquired or legally cleared.
 - No external source has been approved for production release.
 - No production tokenizer has been selected or exported.
-- No transformer architecture or MLX training exists.
+
+### Phase 4 — local MLX pretraining: pilot mechanics implemented, production
+training not approved
+
+Implemented:
+
+- `cyber-decoder-v1`, a causal decoder-only MLX transformer with learned
+  position embeddings, RMSNorm pre-normalization, manual causal attention,
+  SwiGLU MLPs, and tied word embeddings.
+- A checked-in 24K-vocabulary configuration with 11 layers, hidden size 512,
+  eight attention heads, MLP width 1536, context length 512, and exactly
+  50,048,512 parameters.
+- Deterministic random initialization, teacher-forced next-token loss, AdamW,
+  warmup/linear decay schedule, gradient clipping, checkpoint provenance,
+  atomic safetensors checkpoints, resume compatibility checks, and held-out
+  validation/test evaluation.
+- A loader that accepts only a verified frozen snapshot plus matching tokenizer;
+  it creates train blocks only from `train_manifest.jsonl`.
+- Explicit CLI guards: a pilot run needs `--allow-pilot-artifacts` and
+  `--confirm-start`; normal runs cannot silently reuse an existing run
+  directory. Pilot weights are marked non-publishable.
+
+Verified local pilot execution:
+
+- `pilot-v7-50m-bootstrap-v1` performed one 2,048-token update on Apple
+  Silicon. Training loss was 10.5390, gradient norm 11.9467, and one held-out
+  validation batch had loss 10.5427. These are initialization-scale mechanics
+  measurements, not quality metrics.
+
+Not complete:
+
+- No long production training run, meaningful capability evaluation, inference
+  server, generation sampler, constrained decoding, or `MLXCyberModelBackend`.
+- `compile_steps` is intentionally disabled pending measured hardware/memory
+  tuning and has no compiled execution path yet.
 
 ## File-by-file map
 
@@ -324,6 +368,19 @@ without guessing.
 | `src/cyber_agent/tokenizer/model_budget.py` | Architectural estimates for embedding/output vocabulary costs under tied and untied weights. |
 | `src/cyber_agent/tokenizer/serialization.py` | Canonical `cyber-agent-trusted-prompt-v1` serializer; the only component allowed to insert trusted control-token IDs. |
 | `src/cyber_agent/tokenizer/cli.py` | Legacy and snapshot tokenizer commands, model-budget command, inspection, serialization, export, and local attestation. |
+
+### Training
+
+| File | Responsibility |
+| --- | --- |
+| `config/training.json` | Reviewed pilot-only target architecture and optimizer/checkpoint settings. It is the source of the 50,048,512-parameter 24K configuration. |
+| `src/cyber_agent/training/config.py` | Strongly typed, hashable training configuration; validates dimensions and prevents checkpoints outside the project. |
+| `src/cyber_agent/training/model.py` | Randomly initialized MLX causal decoder, attention, SwiGLU blocks, loss, and architecture manifest. No pretrained loading code exists. |
+| `src/cyber_agent/training/data.py` | Validates frozen snapshot/tokenizer provenance and streams only fixed training, validation, or test blocks. Literal control-token strings stay untrusted content. |
+| `src/cyber_agent/training/trainer.py` | Local AdamW training, validation, deterministic setup, metrics, immutable run/checkpoint creation, and resume handling. |
+| `src/cyber_agent/training/checkpoint.py` | Atomic MLX safetensors checkpoint persistence, SHA-256 checksums, and compatibility-checked restoration. |
+| `src/cyber_agent/training/cli.py` | Explicit `inspect-model`, `smoke-train`, `train`, and `evaluate` entry points. The target `train` command requires confirmation. |
+| `docs/training.md` | Safe operational instructions, current pilot status, artifact semantics, and future agent-backend handoff. |
 
 ### Configuration, documentation, fixtures, and tests
 
@@ -528,17 +585,19 @@ missing, ambiguous, conflicting, or disallowed per-file licensing.
 
 ### 2. Build a real pilot corpus
 
-The current budget tops out at 3M estimated tokens while the project objective
-is approximately 10M–30M tokens. Decide whether the pilot budget should be
-raised, then acquire only the explicitly approved sources. Inspect download
+The current cleaned corpus is 4.08M provisional tokens and the fresh-download
+budget has approximately 32.7MB remaining. The project objective is
+approximately 10M–30M tokens. Do not raise a budget or download more data
+without reviewing exact source records and the remaining capacity. Acquire only
+explicitly approved sources. Inspect download
 manifests, raw counts, cleaning rejections, secret detections, duplicate
 groups, category/source balance, and attribution manifests. A new snapshot is
 required after every input/configuration change.
 
 ### 3. Improve held-out evidence
 
-The current validation and test splits are empty. A useful tokenizer comparison
-needs a substantial frozen validation/test set, at least the configured 1,000
+The current snapshot has 49 validation and 44 test records. A useful tokenizer
+comparison needs a substantial frozen validation/test set, at least the configured 1,000
 evaluation documents and 10M estimated training-token evidence thresholds, plus
 representative long technical documents. Keep held-out documents outside
 vocabulary/merge training.
@@ -552,19 +611,21 @@ candidate hash stability, and vocabulary cost. Do not pick the largest
 vocabulary just because it has better compression. The 24K value is a default
 hypothesis, not a decision.
 
-### 5. Freeze the model architecture
+### 5. Revisit the model architecture only after tokenizer selection
 
-Choose hidden size, number of layers/heads, context length, normalization,
-parameter tying, optimizer, and MLX serialization. Recompute the approximately
-50M parameter budget with the selected vocabulary and verify memory/training
-feasibility on the target Apple Silicon machine.
+The pilot target is implemented and has been measured at 50,048,512 parameters
+for 24K tied embeddings. Do not treat it as frozen: revisit vocabulary size,
+context length, hidden size, layer count, optimization schedule, precision,
+memory, and throughput only after selecting a production tokenizer and
+measuring the intended Apple Silicon hardware.
 
-### 6. Implement the model and MLX backend
+### 6. Scale/evaluate training and implement the MLX agent backend
 
-Implement the decoder-only model from random initialization, tokenizer loading,
-training/checkpointing/evaluation, and `MLXCyberModelBackend`. The backend must
-return strict action JSON and use the trusted serializer. It must not bypass
-policy validation or Docker execution. No such implementation exists yet.
+Scale only after the corpus/tokenizer gates pass. Add learning-rate/throughput
+experiments, held-out loss tracking, deterministic resume tests on target
+hardware, a generation sampler, capability/safety evaluation, and then
+`MLXCyberModelBackend`. The backend must return strict action JSON and use the
+trusted serializer. It must not bypass policy validation or Docker execution.
 
 ### 7. Decide release/provenance operations
 
@@ -580,7 +641,8 @@ Do not assume these choices for the next phase:
 
 - Which exact sources/releases are legally approved for pilot and production.
 - Whether to permit any network acquisition, and the source names/byte budget.
-- Whether to raise the current 3M-token budget toward the 10M–30M objective.
+- Whether to raise the remaining 250MB download budget / 12M-token processing
+  cap to reach the 10M–30M objective.
 - Category targets, source caps, minimum category coverage, and sampling seed.
 - Whether local-research data may ever be used for publicly released weights.
 - Hidden size and tied versus untied embedding/output weights.
@@ -593,10 +655,10 @@ Do not assume these choices for the next phase:
 ## Recommended next continuation turn
 
 The safest next task is a read-only review of the pending source records and
-current generated manifests, followed by a user-approved decision on one or two
-exact pilot sources. Do not start a broad download. If a source is approved,
-make its review record complete, add focused tests for that source adapter, run
-the bounded acquisition with explicit confirmation, process the corpus, inspect
-reports, and freeze a new snapshot. Only after a sufficiently large snapshot
-exists should candidate metrics be used for tokenizer selection. Transformer and
-MLX implementation should come after that selection.
+the v7 manifests, followed by a user-approved decision on one or two exact
+sources within the remaining budget. If a source is approved, make its review
+record complete, add focused tests for its adapter, run bounded acquisition with
+explicit confirmation, process the corpus, inspect reports, and freeze a new
+snapshot. Only after a sufficiently large snapshot exists should candidate
+metrics be used for tokenizer selection or long training. Do not promote the
+v7 checkpoint beyond local research.

@@ -1,10 +1,10 @@
 # cyber-agent — safe agent, data, and tokenizer foundations
 
-`cyber-agent` is the policy and sandbox layer for a future, locally trained
-decoder-only cybersecurity model. Phase 1 deliberately contains no language
-model weights, MLX training code, pretrained model, hosted-model SDK, or
-external model API call. The included deterministic backend is temporary test
-infrastructure.
+`cyber-agent` is the policy and sandbox layer, auditable data pipeline,
+tokenizer tooling, and local MLX pretraining foundation for a custom
+decoder-only cybersecurity model. It has no pretrained weights, hosted-model
+SDK, or external model API call. The included deterministic backend is
+temporary test infrastructure.
 
 The default business security floor is maintained in
 [`SECURITY.md`](SECURITY.md). Future phases may add explicit, granular,
@@ -20,9 +20,17 @@ Phase 3 adds deterministic, train-split-only byte-level BPE tokenizer training,
 evaluation, comparison, loading, and explicit final export. See
 [the tokenizer guide](docs/tokenizer.md). The checked-in configuration defaults
 to a 24K vocabulary and supports 16K/24K/32K production candidates, but the tiny
-fixture corpus must use an explicitly labeled small tokenizer. No transformer,
-pretraining loop, pretrained weights, remote dataset, or hosted LLM integration
-is included.
+fixture corpus must use an explicitly labeled small tokenizer. It does not
+include pretrained weights, remote dataset downloads by default, or hosted LLM
+integration.
+
+Phase 4 implements the local-only MLX `cyber-decoder-v1` training path: a
+randomly initialized, tied-embedding decoder-only transformer with 50,048,512
+parameters at the 24K pilot vocabulary. It reads only a frozen snapshot's
+training split, validates artifact provenance, checkpoints atomically, and
+evaluates only held-out splits. The current checkpoint is a private,
+one-step research bootstrap—not a useful or releasable model. See
+[the training guide](docs/training.md).
 
 For a continuation-oriented description of the current implementation, local
 generated state, file responsibilities, invariants, and remaining production
@@ -137,7 +145,7 @@ Final answers must be:
 Unknown keys, unknown action types, unknown tools, and wrong argument types are
 rejected.
 
-## Connecting the custom MLX model later
+## Connecting the trained custom MLX model later
 
 The agent depends only on this protocol:
 
@@ -157,11 +165,12 @@ backend = MLXCyberModelBackend(
 agent = Agent(backend=backend, tools=registry, logger=logger)
 ```
 
-`MLXCyberModelBackend.generate` will load Phase 3's final tokenizer, serialize
-the conversation into the custom model's chat/prompt format, run local MLX
-inference, and return exactly one action JSON string. The parser, policy, Docker
-runtime, tool-result format, and loop do not depend on MLX and need no redesign.
-The eventual backend must use the model trained from random initialization; the
+`MLXCyberModelBackend.generate` remains a future inference integration. It will
+load a production-frozen Phase 4 checkpoint and final tokenizer, serialize the
+conversation into the custom model's chat/prompt format, run local MLX
+inference, and return exactly one action JSON string. The parser, policy,
+Docker runtime, tool-result format, and loop do not depend on MLX and need no
+redesign. It must use the random-initialized model trained locally; the
 temporary deterministic backend must not be shipped as the final model.
 
 ## Security controls
@@ -199,6 +208,9 @@ temporary deterministic backend must not be shipped as the final model.
 - Logs contain user requests and tool arguments. Protect and rotate retained
   audit files; file contents and tool output are not included in audit events.
 - Docker's `--network none` still leaves the loopback interface available.
-- Phase 1 does not yet include model-side constrained decoding, prompt-injection
-  defenses, MLX inference, model training, authentication, or multi-user
-  authorization.
+- The project has local pretraining mechanics but not MLX inference,
+  model-side constrained decoding, capability evaluation, instruction tuning,
+  authentication, or multi-user authorization.
+- The current pilot corpus/tokenizers/checkpoints are explicitly private
+  research artifacts and lack the corpus size, legal release clearance, and
+  evaluation evidence required for a production model.
