@@ -22,11 +22,13 @@ research acquisition, safe archive extraction, deterministic balancing,
 immutable snapshots, snapshot-specific tokenizer candidates, model-budget
 estimates, candidate comparison, trusted prompt serialization, and checksums.
 
-The current corpus is still only a tiny synthetic fixture: four retained
-documents and approximately 404 provisional tokens. The local snapshot is
-`pilot_only`; it is not a production dataset or a production tokenizer. No
-transformer, MLX training loop, hosted LLM integration, or public data release
-exists.
+The current working data directories contain a still-tiny synthetic fixture
+pipeline: 43 raw records, 42 extracted records, 41 cleaned records, and 39
+deduplicated/balanced records (approximately 62,468 provisional tokens). The
+currently frozen snapshots are older and contain only four retained documents
+and approximately 404 provisional tokens. The snapshots are `pilot_only`; they
+are not production datasets or production tokenizers. No transformer, MLX
+training loop, hosted LLM integration, or public data release exists.
 
 ## Verified state at handoff
 
@@ -52,6 +54,23 @@ Do not assume those generated files belong in Git. `git status --short` reports
 these directories because generated snapshots and source material are local
 artifacts. The intended policy is to keep large/generated data out of Git.
 
+The current extracted/materialized local data is specifically:
+
+| Stage/path | Records | Meaning |
+| --- | ---: | --- |
+| `data/raw/documents.jsonl` | 43 | Ingested raw records, including records later rejected. |
+| `data/extracted/documents.jsonl` | 42 | UTF-8/text extraction output; one malformed/raw record was rejected before or during extraction. |
+| `data/cleaned/documents.jsonl` | 41 | Normalized, quality-checked records before deduplication. |
+| `data/cleaned/deduplicated.jsonl` | 39 | Two exact/near duplicates removed. |
+| `data/cleaned/balanced.jsonl` | 39 | Deterministic balancing output; no records excluded in this tiny run. |
+| `data/splits/train.jsonl` | 39 | Current tokenizer-training input. Validation and test are empty for this fixture. |
+
+The extracted source files are local synthetic JSON documents under
+`data/sources/synthetic-safe-tool-examples-v3/documents/`. The acquisition
+manifest records 35 generated documents, 69,815 provisional source tokens, and
+zero downloaded bytes. `data/downloads/` is empty. No external Python, Git,
+Linux, MITRE, CWE, NIST, FineWeb, or other remote corpus has been downloaded.
+
 The observed frozen snapshots are:
 
 | Snapshot | Documents | Estimated tokens | Train/validation/test | Status |
@@ -73,6 +92,10 @@ tokens. They are marked as fixture artifacts, use the same frozen training
 manifest, decode exactly on the fixture evaluation set, and have zero unknown
 tokens there. Candidate comparison reports `insufficient_evidence` and makes
 no recommendation because the corpus and held-out evidence are too small.
+Those candidates were trained from the older four-document frozen snapshot,
+not from the newer 39-record `data/splits/train.jsonl` output. A new immutable
+snapshot and new candidate run are required before the current extracted data
+can affect tokenizer metrics.
 
 ## System architecture
 
@@ -548,4 +571,3 @@ the bounded acquisition with explicit confirmation, process the corpus, inspect
 reports, and freeze a new snapshot. Only after a sufficiently large snapshot
 exists should candidate metrics be used for tokenizer selection. Transformer and
 MLX implementation should come after that selection.
-
