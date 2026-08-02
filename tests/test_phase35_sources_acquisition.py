@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -129,3 +130,24 @@ def test_safe_archive_blocks_traversal_and_decompression_limits(tmp_path: Path) 
     assert (tmp_path / "good-output" / "docs" / "readme.txt").read_text() == "reviewed fixture"
     with pytest.raises(ValueError, match="already exists"):
         safe_extract_archive(good, tmp_path / "good-output")
+
+
+def test_safe_archive_skips_links_without_following_them(tmp_path: Path) -> None:
+    archive_path = tmp_path / "links.tar"
+    payload = b"package main\n"
+    with tarfile.open(archive_path, "w") as archive:
+        regular = tarfile.TarInfo("source/main.go")
+        regular.size = len(payload)
+        archive.addfile(regular, io.BytesIO(payload))
+        link = tarfile.TarInfo("source/escape")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "../../outside"
+        archive.addfile(link)
+
+    report = safe_extract_archive(archive_path, tmp_path / "link-output")
+
+    assert report["files"] == 1
+    assert report["skipped_unsafe_members"] == 1
+    assert (tmp_path / "link-output" / "source" / "main.go").read_bytes() == payload
+    assert not (tmp_path / "link-output" / "source" / "escape").exists()
+    assert not (tmp_path / "outside").exists()

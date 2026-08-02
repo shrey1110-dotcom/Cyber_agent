@@ -32,8 +32,11 @@ Phase 3.5 adds exact-release source reviews, bounded resumable acquisition,
 safe archives, configurable pilot budgets, deterministic balancing, immutable
 snapshots, frozen-snapshot tokenizer candidates, model-budget analysis,
 protected export, checksums/attestations, and injection-safe trusted prompt
-serialization. See [the pilot corpus guide](docs/pilot_corpus.md). External
-sources remain pending and disabled; demonstrations use synthetic fixtures.
+serialization. See [the pilot corpus guide](docs/pilot_corpus.md). A bounded
+local-research pilot has acquired six exact reviewed-for-pilot releases; all
+other configured sources remain pending/disabled. The resulting snapshot and
+tokenizer candidates remain `pilot_only`, are ignored by Git, and are not
+cleared for redistribution or released weights.
 
 The local research pilot milestone adds a separately labeled private-data mode,
 conservative 1M–3M-token budgets, configured official/source archives,

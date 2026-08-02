@@ -21,7 +21,10 @@ SKIP_PATH_PARTS = frozenset({
     ".git", "vendor", "vendors", "vendored", "node_modules", "dist", "build",
     "generated", "__pycache__", ".venv", "venv", "third_party", "third-party",
 })
-CODE_EXTENSIONS = frozenset({".py", ".sh", ".bash", ".json", ".yaml", ".yml", ".dockerfile"})
+CODE_EXTENSIONS = frozenset({
+    ".py", ".sh", ".bash", ".go", ".rs", ".c", ".h", ".cc", ".cpp",
+    ".ps1", ".json", ".yaml", ".yml", ".dockerfile",
+})
 
 
 def _safe_text(path: Path, maximum_bytes: int) -> str | None:
@@ -60,8 +63,10 @@ def _category(source: SourceDefinition, path: Path, text: str) -> str:
 def _language(path: Path) -> str:
     suffix = path.suffix.casefold()
     return {
-        ".py": "python", ".sh": "bash", ".bash": "bash", ".json": "json",
-        ".yaml": "yaml", ".yml": "yaml", ".dockerfile": "dockerfile",
+        ".py": "python", ".sh": "bash", ".bash": "bash", ".go": "go",
+        ".rs": "rust", ".c": "c", ".h": "c", ".cc": "cpp", ".cpp": "cpp",
+        ".ps1": "powershell", ".json": "json", ".yaml": "yaml", ".yml": "yaml",
+        ".dockerfile": "dockerfile",
     }.get(suffix, "en")
 
 

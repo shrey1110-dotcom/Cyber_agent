@@ -221,6 +221,7 @@ def safe_extract_archive(archive: Path, destination: Path, limits: ExtractionLim
     temporary: Path | None = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent))
     file_count = 0
     total_bytes = 0
+    skipped_unsafe_members = 0
     compressed_bytes = max(1, archive.stat().st_size)
     try:
         if zipfile.is_zipfile(archive):
@@ -232,7 +233,11 @@ def safe_extract_archive(archive: Path, destination: Path, limits: ExtractionLim
                         continue
                     unix_mode = (info.external_attr >> 16) & 0o170000
                     if unix_mode == 0o120000:
-                        raise ValueError("archive symbolic links are not allowed")
+                        # Never create or follow archive links.  Skipping them
+                        # permits ordinary source archives containing harmless
+                        # convenience links without weakening extraction bounds.
+                        skipped_unsafe_members += 1
+                        continue
                     members.append((path, info.file_size, lambda info=info: bundle.open(info, "r")))
                 file_count, total_bytes = _extract_members(members, temporary, compressed_bytes, selected_limits)
         elif tarfile.is_tarfile(archive):
@@ -243,14 +248,23 @@ def safe_extract_archive(archive: Path, destination: Path, limits: ExtractionLim
                     if info.isdir():
                         continue
                     if not info.isfile() or info.issym() or info.islnk():
-                        raise ValueError("archive links and special files are not allowed")
+                        # The member name has already passed traversal checks;
+                        # links and device/special members are deliberately not
+                        # extracted and are counted for the audit trail.
+                        skipped_unsafe_members += 1
+                        continue
                     members.append((path, info.size, lambda info=info: bundle.extractfile(info)))
                 file_count, total_bytes = _extract_members(members, temporary, compressed_bytes, selected_limits)
         else:
             raise ValueError("unsupported archive type; only ZIP and TAR are accepted")
         os.replace(temporary, destination)
         temporary = None
-        return {"files": file_count, "uncompressed_bytes": total_bytes, "destination": str(destination)}
+        return {
+            "files": file_count,
+            "uncompressed_bytes": total_bytes,
+            "skipped_unsafe_members": skipped_unsafe_members,
+            "destination": str(destination),
+        }
     finally:
         if temporary is not None and temporary.exists() and temporary.is_dir():
             shutil.rmtree(temporary)

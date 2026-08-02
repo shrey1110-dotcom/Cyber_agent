@@ -26,6 +26,11 @@ BOILERPLATE_PATTERNS = (
     re.compile(r"^(home|products|pricing|documentation)(\s*[|>]\s*(home|products|pricing|documentation))*$", re.IGNORECASE),
     re.compile(r"^(copyright|all rights reserved)\b", re.IGNORECASE),
 )
+# reStructuredText and similar documentation formats use long runs of one
+# punctuation character as heading adornments.  They are presentation syntax,
+# not content; retaining them incorrectly trips the repeated-character safety
+# check.  This is deliberately applied only to prose, never source code.
+STRUCTURAL_ADORNMENT = re.compile(r"^[!#%&'*+,-./:=?@^_`|~]{4,}$")
 
 
 def remove_control_characters(value: str) -> str:
@@ -47,6 +52,8 @@ def normalize_text(value: str, *, preserve_code: bool) -> str:
     seen_short_lines: set[str] = set()
     for raw_line in normalized.split("\n"):
         line = re.sub(r"[ \t]+", " ", raw_line).strip()
+        if line and STRUCTURAL_ADORNMENT.fullmatch(line):
+            continue
         if line and any(pattern.search(line) for pattern in BOILERPLATE_PATTERNS):
             continue
         comparison = line.casefold()
@@ -167,4 +174,3 @@ def _rejection(
         rejected_at=utc_now(),
         metadata={"source_url_hash": sha256_text(raw.source_url)},
     )
-
