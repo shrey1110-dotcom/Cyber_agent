@@ -186,7 +186,7 @@ def acquire_reviewed_source(config: PipelineConfig, source_name: str) -> dict[st
         exact_release_or_version=source.exact_release_or_version,
         url=source.download_location,
         allowed_domains=source.approved_domains or (parsed.hostname or "",),
-        maximum_bytes=config.pilot_budget.maximum_download_bytes,
+        maximum_bytes=min(config.pilot_budget.maximum_download_bytes, source.maximum_download_bytes or config.pilot_budget.maximum_download_bytes),
         expected_sha256=source.published_sha256 or None,
         timeout_seconds=config.pilot_budget.request_timeout_seconds,
         retry_limit=config.pilot_budget.maximum_retries,

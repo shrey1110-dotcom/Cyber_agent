@@ -21,7 +21,18 @@ from cyber_agent.data_pipeline.sources import SourceDefinition, SourceRegistry
 from cyber_agent.data_pipeline.synthetic import EXAMPLE_KINDS, SAFE_TOOLS, generate_safe_tool_examples
 
 
-def _download_destination(config: PipelineConfig, source: SourceDefinition) -> Path:
+def _download_destination(config: PipelineConfig, source: SourceDefinition, registry: SourceRegistry) -> Path:
+    reuse_source_name = (source.adapter_options or {}).get("reuse_download_from")
+    if reuse_source_name is not None:
+        if not isinstance(reuse_source_name, str) or not reuse_source_name:
+            raise ValueError(f"source {source.source_name} has an invalid reuse_download_from value")
+        original = registry.source_by_name(reuse_source_name)
+        if (
+            original.download_location != source.download_location
+            or original.exact_release_or_version != source.exact_release_or_version
+        ):
+            raise ValueError("archive reuse requires the same exact download URL and pinned release")
+        return _download_destination(config, original, registry)
     filename = Path(urllib.parse.urlparse(source.download_location).path).name
     if not filename:
         raise ValueError(f"configured source URL does not identify a file: {source.source_name}")
@@ -126,14 +137,14 @@ def acquire_pilot(
         if remaining_download <= 0:
             collection_end_reason = "maximum_download_bytes"
             break
-        destination = _download_destination(config, source)
+        destination = _download_destination(config, source, registry)
         parsed = urllib.parse.urlparse(source.download_location)
         spec = DownloadSpec(
             source_name=source.source_name,
             exact_release_or_version=source.exact_release_or_version,
             url=source.download_location,
             allowed_domains=source.approved_domains or (parsed.hostname or "",),
-            maximum_bytes=remaining_download,
+            maximum_bytes=min(remaining_download, source.maximum_download_bytes or remaining_download),
             expected_sha256=source.published_sha256 or None,
             timeout_seconds=config.pilot_budget.request_timeout_seconds,
             retry_limit=config.pilot_budget.maximum_retries,

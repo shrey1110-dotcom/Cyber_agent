@@ -5,8 +5,7 @@ from pathlib import Path
 import pytest
 
 from cyber_agent.data_pipeline.config import PipelineConfig
-from cyber_agent.data_pipeline.materialize import materialize_archive
-from cyber_agent.data_pipeline.materialize import _category, _language
+from cyber_agent.data_pipeline.materialize import _category, _language, _selected_paths, materialize_archive
 from cyber_agent.data_pipeline.sources import SourceDefinition
 
 
@@ -64,3 +63,46 @@ def test_materializer_rejects_empty_path_filter_output(pipeline_project: Path) -
         materialize_archive(config, source, extracted)
 
     assert not (pipeline_project / "data" / "sources" / "empty-filter-fixture").exists()
+
+
+def test_materializer_permits_a_reviewed_build_path_override_only(pipeline_project: Path) -> None:
+    source = SourceDefinition.from_dict(
+        {
+            "source_name": "build-path-fixture",
+            "exact_release_or_version": "v1",
+            "download_location": "local://build-path-fixture",
+            "publisher": "Fixture",
+            "license": "MIT",
+            "category": "general",
+            "retrieved_at": "2026-08-02T00:00:00+00:00",
+            "local_research_source": True,
+            "acquisition_enabled": False,
+            "adapter_options": {
+                "extensions": [".rst"],
+                "path_prefixes": ["package/doc/build/"],
+                "allow_path_parts": ["build"],
+            },
+        }
+    )
+    extracted = pipeline_project / "build-path-archive"
+    document = extracted / "package" / "doc" / "build" / "guide.rst"
+    document.parent.mkdir(parents=True)
+    document.write_text("Guide\n=====\n\n" + "Reviewed documentation. " * 10, encoding="utf-8")
+    assert list(_selected_paths(extracted, source)) == [document]
+
+    invalid = SourceDefinition.from_dict(
+        {
+            "source_name": "bad-build-path-fixture",
+            "exact_release_or_version": "v1",
+            "download_location": "local://bad-build-path-fixture",
+            "publisher": "Fixture",
+            "license": "MIT",
+            "category": "general",
+            "retrieved_at": "2026-08-02T00:00:00+00:00",
+            "local_research_source": True,
+            "acquisition_enabled": False,
+            "adapter_options": {"allow_path_parts": ["not-a-skip-rule"]},
+        }
+    )
+    with pytest.raises(ValueError, match="not a normally skipped"):
+        list(_selected_paths(extracted, invalid))

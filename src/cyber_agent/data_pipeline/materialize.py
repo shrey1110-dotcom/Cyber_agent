@@ -76,8 +76,13 @@ def _selected_paths(root: Path, source: SourceDefinition) -> Iterable[Path]:
     extensions = {str(item).casefold() for item in options.get("extensions", [])}
     prefixes = tuple(str(item) for item in options.get("path_prefixes", []))
     contains = tuple(str(item) for item in options.get("path_contains", []))
+    allowed_path_parts = {str(item).casefold() for item in options.get("allow_path_parts", [])}
+    unknown_overrides = allowed_path_parts - SKIP_PATH_PARTS
+    if unknown_overrides:
+        raise ValueError(f"source path override is not a normally skipped path part: {sorted(unknown_overrides)}")
+    blocked_parts = SKIP_PATH_PARTS - allowed_path_parts
     for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
-        if not path.is_file() or any(part.casefold() in SKIP_PATH_PARTS for part in path.parts):
+        if not path.is_file() or any(part.casefold() in blocked_parts for part in path.parts):
             continue
         relative = path.relative_to(root).as_posix()
         suffix = path.suffix.casefold()

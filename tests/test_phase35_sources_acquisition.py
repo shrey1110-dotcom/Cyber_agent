@@ -5,11 +5,13 @@ import io
 import json
 import tarfile
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from cyber_agent.data_pipeline.acquisition import DownloadSpec, ExtractionLimits, download_file, safe_extract_archive
+from cyber_agent.data_pipeline.pilot_acquisition import _download_destination
 from cyber_agent.data_pipeline.config import PipelineConfig
 from cyber_agent.data_pipeline.export import read_jsonl
 from cyber_agent.data_pipeline.ingest import run_ingest
@@ -47,6 +49,7 @@ def test_review_status_and_exact_release_enforcement(pipeline_project: Path) -> 
     manifest_path.write_text("{}\n", encoding="utf-8")
     with pytest.raises(ValueError, match="disabled placeholder"):
         registry.require_ingestible("git-2.50.0", config.license_policy)
+
 
     manifest = pipeline_project / "fixtures" / "sample_corpus" / "manifest.jsonl"
     lines = manifest.read_text(encoding="utf-8").splitlines()
@@ -158,3 +161,23 @@ def test_safe_archive_skips_links_without_following_them(tmp_path: Path) -> None
     assert (tmp_path / "link-output" / "source" / "main.go").read_bytes() == payload
     assert not (tmp_path / "link-output" / "source" / "escape").exists()
     assert not (tmp_path / "outside").exists()
+
+
+def test_same_release_archive_reuse_requires_exact_url_and_version(pipeline_project: Path) -> None:
+    config = PipelineConfig.load(pipeline_project)
+    registry = SourceRegistry.load(config.paths)
+    original = registry.source_by_name("fastapi-0.115.12-en-docs")
+    reused = registry.source_by_name("fastapi-0.115.12-code-reuse")
+
+    assert _download_destination(config, reused, registry) == _download_destination(config, original, registry)
+
+    changed_release = replace(reused, exact_release_or_version="0.115.13")
+    guarded_registry = SourceRegistry(
+        [
+            source for source in registry.all_sources()
+            if source.source_name != changed_release.source_name
+        ] + [changed_release],
+        config.paths,
+    )
+    with pytest.raises(ValueError, match="same exact download URL and pinned release"):
+        _download_destination(config, changed_release, guarded_registry)

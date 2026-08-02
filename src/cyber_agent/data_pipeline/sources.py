@@ -43,6 +43,7 @@ class SourceDefinition:
     retrieved_at: str = ""
     local_research_source: bool = False
     acquisition_enabled: bool = False
+    maximum_download_bytes: int | None = None
     adapter_options: dict[str, Any] | None = None
 
     @classmethod
@@ -117,6 +118,10 @@ class SourceDefinition:
             retrieved_at=value.get("retrieved_at", value.get("reviewed_at", "")),
             local_research_source=local_research_source,
             acquisition_enabled=value.get("acquisition_enabled", False),
+            maximum_download_bytes=(
+                int(value["maximum_download_bytes"])
+                if value.get("maximum_download_bytes") is not None else None
+            ),
             adapter_options=value.get("adapter_options", {}),
         )
 
@@ -169,6 +174,8 @@ class SourceDefinition:
                 errors.append(f"{self.source_name}: denied terms cannot be used in local research mode")
             if self.acquisition_enabled and self.adapter.startswith("http_") and not self.approved_domains:
                 errors.append(f"{self.source_name}: remote source requires approved_domains")
+            if self.maximum_download_bytes is not None and self.maximum_download_bytes < 1:
+                errors.append(f"{self.source_name}: maximum_download_bytes must be positive when configured")
         if self.enabled and not approved and not self.local_research_source:
             errors.append(f"{self.source_name}: enabled source is not approved for pilot or production")
         if approved and (not self.reviewed_by.strip() or not self.reviewed_at.strip()):
@@ -236,7 +243,7 @@ class SourceRegistry:
             raise ValueError("; ".join(errors))
         if not source.enabled:
             raise ValueError(f"source is configured as a disabled placeholder: {source_name}")
-        if not source.is_approved and not source.local_research_source:
+        if not source.is_approved:
             raise ValueError(f"source review status does not permit ingestion: {source_name} ({source.review_status})")
         if source.adapter not in {
             "local_manifest", "synthetic_tool_examples", "http_archive_text",
@@ -288,6 +295,13 @@ class SourceRegistry:
 
     def all_sources(self) -> list[SourceDefinition]:
         return list(self._sources.values())
+
+    def source_by_name(self, source_name: str) -> SourceDefinition:
+        """Return a configured source for safe same-release archive reuse checks."""
+        try:
+            return self._sources[source_name]
+        except KeyError as exc:
+            raise ValueError(f"source is not present in the allowlist: {source_name}") from exc
 
     def manifest_path(self, source: SourceDefinition) -> Path:
         path = (self.paths.project_root / source.data_location).resolve()
