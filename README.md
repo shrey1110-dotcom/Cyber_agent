@@ -33,7 +33,7 @@ safe archives, configurable pilot budgets, deterministic balancing, immutable
 snapshots, frozen-snapshot tokenizer candidates, model-budget analysis,
 protected export, checksums/attestations, and injection-safe trusted prompt
 serialization. See [the pilot corpus guide](docs/pilot_corpus.md). A bounded
-local-research pilot has acquired six exact reviewed-for-pilot releases; all
+local-research pilot has acquired ten exact reviewed-for-pilot releases; all
 other configured sources remain pending/disabled. The resulting snapshot and
 tokenizer candidates remain `pilot_only`, are ignored by Git, and are not
 cleared for redistribution or released weights.

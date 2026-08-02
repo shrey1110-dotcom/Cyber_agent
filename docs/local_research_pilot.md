@@ -31,6 +31,10 @@ retrieval date, domains, provenance URL, and materializer. The initial set is:
 - Black 26.5.1 source under its stated MIT license;
 - Moby `docker-v29.0.0` source under its stated Apache-2.0 license;
 - Cosign v3.0.6 source under its stated Apache-2.0 license;
+- FastAPI 0.115.12 English documentation under its stated MIT license;
+- Trivy v0.66.0 documentation under its stated Apache-2.0 license;
+- OpenTelemetry Collector v0.153.0 documentation under its stated Apache-2.0 license;
+- YARA v4.5.5 documentation under its stated BSD-3-Clause license;
 - Git 2.50.0 documentation and selected shell/configuration files, recorded as
   GPL-2.0-only and requiring review before publication;
 - Linux man-pages 6.15, recorded as `REVIEW_REQUIRED` because file-level terms
@@ -42,6 +46,10 @@ retrieval date, domains, provenance URL, and materializer. The initial set is:
 This configuration is not a legal conclusion. Records labeled
 `REVIEW_REQUIRED`, and every included source while `release_cleared` is false,
 must be reviewed or removed before open-weight publication.
+
+Only enabled records with review status `approved_for_pilot` or
+`approved_for_production` can be acquired or ingested. A previously
+materialized manifest does not override a later disabled or pending status.
 
 ## Acquisition
 

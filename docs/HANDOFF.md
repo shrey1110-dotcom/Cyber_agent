@@ -22,11 +22,13 @@ research acquisition, safe archive extraction, deterministic balancing,
 immutable snapshots, snapshot-specific tokenizer candidates, model-budget
 estimates, candidate comparison, trusted prompt serialization, and checksums.
 
-The most recent local-research run acquired six exact, pinned, reviewed-for-
-pilot releases under the 3M provisional-token download cap: Python 3.13.14
-text documentation, Requests v2.32.4, HTTPX 0.28.1, Black 26.5.1, Moby
-`docker-v29.0.0`, and Cosign v3.0.6. After cleaning, secret/PII filtering, and
-deduplication, `cyber-pilot-v4` contains 636 retained documents and 801,556
+The most recent local-research runs acquired ten exact, pinned, reviewed-for-
+pilot releases under separate 3M provisional-token caps: Python 3.13.14 text
+documentation, Requests v2.32.4, HTTPX 0.28.1, Black 26.5.1, Moby
+`docker-v29.0.0`, Cosign v3.0.6, FastAPI 0.115.12 English documentation, Trivy
+v0.66.0 documentation, OpenTelemetry Collector v0.153.0 documentation, and
+YARA v4.5.5 documentation. After cleaning, secret/PII filtering, and
+deduplication, `cyber-pilot-v5` contains 917 retained documents and 1,121,828
 provisional tokens. It is `pilot_only`, local-research-only, and explicitly not
 cleared for data redistribution or model-weight publication. Its 16K/24K/32K
 tokenizer candidates are valid research artifacts but have insufficient
@@ -38,7 +40,7 @@ integration, or public data release exists.
 The complete test suite passed after the latest acquisition/extraction changes:
 
 ```text
-100 passed in 0.79s
+102 passed in 0.78s
 ```
 
 The prior 86 Phase 1–3 tests are included in that run and still pass. The
@@ -60,21 +62,24 @@ The current extracted/materialized local data is specifically:
 
 | Stage/path | Records | Meaning |
 | --- | ---: | --- |
-| `data/raw/documents.jsonl` | 958 | Ingested raw records, including records later rejected. |
-| `data/extracted/documents.jsonl` | 894 | UTF-8/text extraction output after safe secret/PII rejection. |
-| `data/cleaned/documents.jsonl` | 660 | Normalized, quality-checked records before deduplication. |
-| `data/cleaned/deduplicated.jsonl` | 636 | One exact and 23 near duplicates removed. |
-| `data/cleaned/balanced.jsonl` | 636 | Deterministic balancing output; no records excluded by the configured caps. |
-| `data/splits/train.jsonl` | 630 | Snapshot tokenizer-training input. |
-| `data/splits/validation.jsonl` / `test.jsonl` | 2 / 4 | Held-out evaluation documents; they are not tokenizer-training input. |
+| `data/raw/documents.jsonl` | 1,329 | Ingested raw records, including records later rejected. |
+| `data/extracted/documents.jsonl` | 1,256 | UTF-8/text extraction output after safe secret/PII rejection. |
+| `data/cleaned/documents.jsonl` | 950 | Normalized, quality-checked records before deduplication. |
+| `data/cleaned/deduplicated.jsonl` | 917 | One exact and 32 near duplicates removed. |
+| `data/cleaned/balanced.jsonl` | 917 | Deterministic balancing output; no records excluded by the configured caps. |
+| `data/splits/train.jsonl` | 907 | Snapshot tokenizer-training input. |
+| `data/splits/validation.jsonl` / `test.jsonl` | 3 / 7 | Held-out evaluation documents; they are not tokenizer-training input. |
 
 The extracted source files live below `data/sources/<exact-source-name>/` and
 the archives plus atomic download manifests live below `data/downloads/`.
-`data/manifests/pilot_acquisition.json` records 915 materialized remote source
-documents, 2,999,585 provisional source tokens, 33,467,698 downloaded bytes,
-source checksums, final redirected domains, and the fact that downloaded code
-was not executed. The configured Git, Linux man-pages, MITRE, CWE, NIST, and
-FineWeb placeholders remain unacquired and pending legal/source review.
+`data/manifests/pilot_acquisition.json` records the most recent source batch;
+the local archive directory currently totals 160,246,009 downloaded bytes.
+Each download manifest records checksums, final redirected domains, and the
+fact that downloaded code was not executed. A FastAPI path-prefix mismatch and
+the empty in-tree Kubernetes documentation path were detected during audit,
+recorded locally, and disabled rather than silently ingested. The configured
+Git, Linux man-pages, MITRE, CWE, NIST, and FineWeb placeholders remain
+unacquired and pending legal/source review.
 
 The observed frozen snapshots are:
 
@@ -84,6 +89,7 @@ The observed frozen snapshots are:
 | `cyber-pilot-v1.v2` | 4 accepted, 4 rejected | 404 | 4 / 0 / 0 | `pilot_only` |
 | `cyber-pilot-v3` | 39 accepted, 4 rejected | 62,468 | 39 / 0 / 0 | `pilot_only` |
 | `cyber-pilot-v4` | 636 accepted, 300 rejected | 801,556 | 630 / 2 / 4 | `pilot_only` |
+| `cyber-pilot-v5` | 917 accepted, 381 rejected | 1,121,828 | 907 / 3 / 7 | `pilot_only` |
 
 Both snapshots are local-research-only, release-cleared is false, dataset
 redistribution is false, and model-weight publication is false. They are
@@ -93,12 +99,12 @@ state that existed when each snapshot was created; a future snapshot must be
 created after any input/configuration change.
 
 The latest snapshot-specific tokenizer candidates are under
-`artifacts/tokenizers/candidates/cyber-pilot-v4/16000`, `24000`, and `32000`.
+`artifacts/tokenizers/candidates/cyber-pilot-v5/16000`, `24000`, and `32000`.
 All requested sizes were produced. They use the same frozen train-manifest
 hash, stable special-token IDs (pad through code are IDs 0 through 11), exact
 decode round trips, and zero unknown-token dependence. Exact training-token
-counts are 874,648 (16K), 848,804 (24K), and 832,810 (32K). The held-out set
-contains only six snapshot documents (22 evaluation inputs including fixed
+counts are 1,212,477 (16K), 1,178,195 (24K), and 1,158,848 (32K). The held-out
+set contains only ten snapshot documents (26 evaluation inputs including fixed
 representative fixtures), so comparison is deliberately `insufficient_evidence`
 and recommends no candidate. At 512 hidden dimensions with tied embeddings,
 the vocabulary cost is 8.19M/12.29M/16.38M parameters for 16K/24K/32K.
@@ -494,6 +500,8 @@ These are continuation requirements, not optional style preferences:
   the repository root.
 - Never infer a license from a homepage or public visibility.
 - Never silently carry approval from one release/version to another.
+- Never ingest or download a disabled or pending source, even if an old local
+  manifest happens to exist.
 - Never download remote data without explicit source selection and confirmation.
 - Never embed credentials in URLs/configuration.
 - Never execute downloaded code, scripts, or archive contents.
