@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import tempfile
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -50,26 +50,53 @@ def atomic_write_json(path: Path, value: Any) -> None:
 
 
 def atomic_write_jsonl(path: Path, records: Iterable[dict[str, Any]]) -> None:
-    atomic_write_text(path, "".join(canonical_json(record) + "\n" for record in records))
+    """Atomically write JSONL without materializing the full iterable in RAM."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            for record in records:
+                handle.write(canonical_json(record))
+                handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
+    return list(iter_jsonl(path))
+
+
+def iter_jsonl(path: Path) -> Iterator[dict[str, Any]]:
+    """Yield validated JSONL records one at a time for bounded-memory stages."""
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError as exc:
+        handle = path.open(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
         raise ValueError(f"cannot read JSONL file {path}: {exc}") from exc
-    for line_number, line in enumerate(lines, start=1):
-        if not line.strip():
-            continue
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"invalid JSONL at {path}:{line_number}: {exc.msg}") from exc
-        if not isinstance(value, dict):
-            raise ValueError(f"JSONL record must be an object at {path}:{line_number}")
-        records.append(value)
-    return records
+    with handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid JSONL at {path}:{line_number}: {exc.msg}") from exc
+            if not isinstance(value, dict):
+                raise ValueError(f"JSONL record must be an object at {path}:{line_number}")
+            yield value
 
 
 def fingerprint(paths: Iterable[Path], configuration: Any = None) -> str:

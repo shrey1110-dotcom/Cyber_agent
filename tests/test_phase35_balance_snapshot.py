@@ -10,6 +10,7 @@ from cyber_agent.data_pipeline.balance import balance_documents, estimate_pre_to
 from cyber_agent.data_pipeline.config import PipelineConfig
 from cyber_agent.data_pipeline.schemas import Document, sha256_text
 from cyber_agent.data_pipeline.snapshot import SNAPSHOT_FILES, freeze_snapshot, verify_snapshot
+from cyber_agent.data_pipeline.split import split_documents
 from cyber_agent.provenance import generate_provenance_attestation
 
 
@@ -55,6 +56,35 @@ def test_provisional_estimator_and_deterministic_balancing(pipeline_project: Pat
     assert first.report["provisional_estimator"]["exact"] is False
     assert estimate_pre_tokenizer_tokens("abcd") == 1
     assert len(first.exclusions) == len(documents) - len(first.selected)
+
+
+def test_balancing_uses_an_independent_hash_domain_from_splitting(pipeline_project: Path) -> None:
+    config = PipelineConfig.load(pipeline_project)
+    budget = replace(
+        config.pilot_budget,
+        maximum_clean_documents=400,
+        maximum_documents_per_source=1000,
+        maximum_estimated_tokens=10_000_000,
+        maximum_tokens_per_source=10_000_000,
+        maximum_tokens_per_category={name: 10_000_000 for name in config.pilot_budget.maximum_tokens_per_category},
+        minimum_tokens_per_category={name: 0 for name in config.pilot_budget.minimum_tokens_per_category},
+    )
+    documents = [
+        make_document(
+            f"doc-{index:04d}",
+            source="one",
+            category="general",
+            text=f"A unique technical document with identifier {index}. " * 8,
+        )
+        for index in range(1000)
+    ]
+    balanced = balance_documents(documents, budget=budget, seed=42)
+    splits, _assignments = split_documents(
+        list(balanced.selected), seed=42, proportions=config.split_proportions
+    )
+    assert len(balanced.selected) == 400
+    assert splits["validation"]
+    assert splits["test"]
 
 
 def test_snapshot_is_complete_immutable_and_checksum_verified(tokenizer_project: Path) -> None:

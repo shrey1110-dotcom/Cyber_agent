@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from cyber_agent.data_pipeline.config import PipelineConfig
-from cyber_agent.data_pipeline.export import (
-    atomic_write_jsonl,
-    fingerprint,
-    stage_is_current,
-    write_stage_marker,
-)
+from cyber_agent.data_pipeline.export import fingerprint, stage_is_current, write_stage_marker
 from cyber_agent.data_pipeline.extract import validate_utf8
-from cyber_agent.data_pipeline.schemas import RawDocument, RejectionRecord, sha256_text, stable_document_id, utc_now
+from cyber_agent.data_pipeline.schemas import RawDocument, RejectionRecord, canonical_json, stable_document_id, utc_now
 from cyber_agent.data_pipeline.sources import SourceDefinition, SourceRegistry
 
 
@@ -37,12 +35,16 @@ def run_ingest(
         raise ValueError("no enabled sources selected")
 
     manifests = [registry.manifest_path(source) for source in sources]
-    input_paths = manifests + [
+    # Materialized source directories are themselves atomically published.  A
+    # full recursive content fingerprint here becomes prohibitively expensive
+    # for a 150M-token collection (hundreds of thousands of files) and defeats
+    # streaming before ingestion starts.  The manifest plus its source report
+    # are the immutable source-stage interface; each content file is still
+    # strictly path-checked and UTF-8-validated as it is ingested.
+    input_paths = [
         item
         for manifest in manifests
-        if manifest.parent.exists()
-        for item in manifest.parent.rglob("*")
-        if item.is_file()
+        for item in (manifest, manifest.parent / "materialization_report.json")
     ]
     input_fingerprint = fingerprint(
         input_paths,
@@ -54,91 +56,110 @@ def run_ingest(
     if not force and stage_is_current(config.paths.manifests, "ingest", input_fingerprint, outputs):
         return {"stage": "ingest", "status": "skipped", "outputs": [str(path) for path in outputs]}
 
-    accepted: list[RawDocument] = []
-    rejected: list[RejectionRecord] = []
+    # This stage can ingest hundreds of thousands of source documents.  Keep
+    # outputs temporary and stream records rather than retaining every raw text
+    # and rejection in process memory.
+    temporary: Path | None = Path(tempfile.mkdtemp(prefix=".ingest.", suffix=".tmp", dir=config.paths.data))
+    raw_temporary = temporary / "documents.jsonl"
+    rejected_temporary = temporary / "ingest.jsonl"
+    accepted_count = 0
+    rejected_count = 0
     budget_end_reasons: dict[str, int] = {}
-    for source, manifest in zip(sources, manifests, strict=True):
-        source_accepted, source_rejected = _ingest_manifest(config, source, manifest)
-        source_accepted.sort(key=lambda record: record.document_id)
-        source_limit = config.pilot_budget.maximum_documents_per_source
-        global_remaining = max(0, config.pilot_budget.maximum_raw_documents - len(accepted))
-        keep_count = min(len(source_accepted), source_limit, global_remaining)
-        accepted.extend(source_accepted[:keep_count])
-        for record in source_accepted[keep_count:]:
-            reason = (
-                "maximum_raw_documents"
-                if global_remaining <= min(len(source_accepted), source_limit)
-                else "maximum_documents_per_source"
-            )
-            budget_end_reasons[reason] = budget_end_reasons.get(reason, 0) + 1
-            rejected.append(
-                RejectionRecord(
-                    document_id=record.document_id,
-                    source_name=record.source_name,
-                    stage="ingest",
-                    reason=f"pilot collection stopped at {reason}",
-                    reason_codes=(reason,),
-                    rejected_at=utc_now(),
-                    metadata={"pilot_budget_exclusion": True},
-                )
-            )
-        rejected.extend(source_rejected)
+    try:
+        assert temporary is not None
+        with raw_temporary.open("x", encoding="utf-8", newline="\n") as raw_handle, rejected_temporary.open(
+            "x", encoding="utf-8", newline="\n"
+        ) as rejected_handle:
+            for source, manifest in sorted(zip(sources, manifests, strict=True), key=lambda item: item[0].source_name):
+                source_accepted = 0
+                for value in _iter_ingest_manifest(config, source, manifest):
+                    if isinstance(value, RejectionRecord):
+                        rejected_handle.write(canonical_json(value.to_dict()) + "\n")
+                        rejected_count += 1
+                        continue
+                    if source_accepted >= config.pilot_budget.maximum_documents_per_source:
+                        reason = "maximum_documents_per_source"
+                    elif accepted_count >= config.pilot_budget.maximum_raw_documents:
+                        reason = "maximum_raw_documents"
+                    else:
+                        raw_handle.write(canonical_json(value.to_dict()) + "\n")
+                        source_accepted += 1
+                        accepted_count += 1
+                        continue
+                    budget_end_reasons[reason] = budget_end_reasons.get(reason, 0) + 1
+                    rejected_handle.write(
+                        canonical_json(
+                            RejectionRecord(
+                                document_id=value.document_id,
+                                source_name=value.source_name,
+                                stage="ingest",
+                                reason=f"pilot collection stopped at {reason}",
+                                reason_codes=(reason,),
+                                rejected_at=utc_now(),
+                                metadata={"pilot_budget_exclusion": True},
+                            ).to_dict()
+                        )
+                        + "\n"
+                    )
+                    rejected_count += 1
+            raw_handle.flush()
+            rejected_handle.flush()
+            os.fsync(raw_handle.fileno())
+            os.fsync(rejected_handle.fileno())
+        os.replace(raw_temporary, raw_path)
+        os.replace(rejected_temporary, rejected_path)
+        shutil.rmtree(temporary)
+        temporary = None
+        counts = {"accepted": accepted_count, "rejected": rejected_count, "sources": len(sources)}
+        write_stage_marker(config.paths.manifests, "ingest", input_fingerprint, outputs, counts)
+        return {
+            "stage": "ingest",
+            "status": "complete",
+            **counts,
+            "collection_end_reason": max(budget_end_reasons, key=budget_end_reasons.get) if budget_end_reasons else "input_exhausted",
+            "budget_exclusions": dict(sorted(budget_end_reasons.items())),
+            "outputs": [str(path) for path in outputs],
+        }
+    finally:
+        if temporary is not None:
+            shutil.rmtree(temporary, ignore_errors=True)
 
-    accepted.sort(key=lambda record: record.document_id)
-    rejected.sort(key=lambda record: record.document_id)
-    atomic_write_jsonl(raw_path, (record.to_dict() for record in accepted))
-    atomic_write_jsonl(rejected_path, (record.to_dict() for record in rejected))
-    counts = {"accepted": len(accepted), "rejected": len(rejected), "sources": len(sources)}
-    write_stage_marker(config.paths.manifests, "ingest", input_fingerprint, outputs, counts)
-    return {
-        "stage": "ingest",
-        "status": "complete",
-        **counts,
-        "collection_end_reason": max(budget_end_reasons, key=budget_end_reasons.get) if budget_end_reasons else "input_exhausted",
-        "budget_exclusions": dict(sorted(budget_end_reasons.items())),
-        "outputs": [str(path) for path in outputs],
-    }
 
-
-def _ingest_manifest(
+def _iter_ingest_manifest(
     config: PipelineConfig,
     source: SourceDefinition,
     manifest_path: Path,
-) -> tuple[list[RawDocument], list[RejectionRecord]]:
+) -> Iterator[RawDocument | RejectionRecord]:
     if not manifest_path.exists():
         raise ValueError(f"source manifest does not exist: {manifest_path}")
     try:
-        lines = manifest_path.read_text(encoding="utf-8", errors="strict").splitlines()
+        handle = manifest_path.open(encoding="utf-8", errors="strict")
     except (OSError, UnicodeDecodeError) as exc:
         raise ValueError(f"cannot read source manifest {manifest_path}: {exc}") from exc
-    accepted: list[RawDocument] = []
-    rejected: list[RejectionRecord] = []
-    for line_number, line in enumerate(lines, start=1):
-        if not line.strip():
-            continue
-        fallback_id = stable_document_id(source.source_name, f"{manifest_path.name}#line-{line_number}")
-        try:
-            entry = json.loads(line)
-            if not isinstance(entry, dict):
-                raise ValueError("manifest record must be an object")
-        except (json.JSONDecodeError, ValueError) as exc:
-            rejected.append(_safe_rejection(fallback_id, source.source_name, "malformed_manifest", str(exc), line_number))
-            continue
-        source_url = entry.get("source_url")
-        document_id = (
-            stable_document_id(source.source_name, source_url)
-            if isinstance(source_url, str) and source_url.strip()
-            else fallback_id
-        )
-        try:
-            record = _load_entry(config, source, manifest_path, entry, document_id)
-        except (OSError, UnicodeDecodeError, ValueError) as exc:
-            message = str(exc)
-            code = _rejection_code(message)
-            rejected.append(_safe_rejection(document_id, source.source_name, code, message, line_number))
-            continue
-        accepted.append(record)
-    return accepted, rejected
+    with handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            fallback_id = stable_document_id(source.source_name, f"{manifest_path.name}#line-{line_number}")
+            try:
+                entry = json.loads(line)
+                if not isinstance(entry, dict):
+                    raise ValueError("manifest record must be an object")
+            except (json.JSONDecodeError, ValueError) as exc:
+                yield _safe_rejection(fallback_id, source.source_name, "malformed_manifest", str(exc), line_number)
+                continue
+            source_url = entry.get("source_url")
+            document_id = (
+                stable_document_id(source.source_name, source_url)
+                if isinstance(source_url, str) and source_url.strip()
+                else fallback_id
+            )
+            try:
+                yield _load_entry(config, source, manifest_path, entry, document_id)
+            except (OSError, UnicodeDecodeError, ValueError) as exc:
+                message = str(exc)
+                code = _rejection_code(message)
+                yield _safe_rejection(document_id, source.source_name, code, message, line_number)
 
 
 def _load_entry(

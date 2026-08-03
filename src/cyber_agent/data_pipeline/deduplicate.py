@@ -27,7 +27,42 @@ def token_shingles(text: str, width: int = 3) -> set[str]:
 
 
 def simhash64(text: str) -> int:
-    """Compute a deterministic 64-bit SimHash over unique three-token shingles."""
+    """Compute a bounded deterministic 64-bit SimHash over sampled shingles.
+
+    A full per-shingle SimHash is unsuitable for a laptop-scale 150M-token
+    collection because it performs 64 Python operations for every token.  This
+    uses up to eight evenly spaced three-token features per document.  Exact
+    deduplication remains exhaustive and every approximate candidate is later
+    verified with full lexical shingle similarity before removal.
+    """
+    tokens = re.findall(r"[a-z0-9_]+", text.casefold())
+    if not tokens:
+        return 0
+    width = 3
+    available = max(1, len(tokens) - width + 1)
+    sample_count = min(8, available)
+    positions = {
+        0 if sample_count == 1 else index * (available - 1) // (sample_count - 1)
+        for index in range(sample_count)
+    }
+    shingles = {
+        " ".join(tokens[position : position + width])
+        for position in positions
+    }
+    vector = [0] * 64
+    for shingle in shingles:
+        value = int.from_bytes(hashlib.sha256(shingle.encode("utf-8")).digest()[:8], "big")
+        for bit in range(64):
+            vector[bit] += 1 if value & (1 << bit) else -1
+    result = 0
+    for bit, weight in enumerate(vector):
+        if weight >= 0:
+            result |= 1 << bit
+    return result
+
+
+def _full_simhash64(text: str) -> int:
+    """High-recall reference SimHash retained for small fixture/pilot inputs."""
     shingles = token_shingles(text)
     if not shingles:
         return 0
@@ -93,21 +128,57 @@ def deduplicate_documents(
                 exact_removed_to_keeper[duplicate.document_id] = keeper.document_id
 
     union = _UnionFind([document.document_id for document in exact_keepers])
-    fingerprints = {document.document_id: simhash64(document.text) for document in exact_keepers}
+    fingerprint_function = _full_simhash64 if len(exact_keepers) <= 10_000 else simhash64
+    fingerprints = {
+        document.document_id: fingerprint_function(document.text)
+        for document in exact_keepers
+    }
     pair_similarity: dict[tuple[str, str], float] = {}
-    for index, left in enumerate(exact_keepers):
-        for right in exact_keepers[index + 1 :]:
-            distance = hamming_distance(fingerprints[left.document_id], fingerprints[right.document_id])
-            if distance > hamming_threshold:
+    by_id = {document.document_id: document for document in exact_keepers}
+
+    # Banded SimHash candidate discovery replaces the former all-pairs scan.
+    # Each candidate is still verified with the configured Hamming distance and
+    # lexical shingle similarity, so a shared band alone never removes data.
+    # The bands are an intentionally documented recall/scale trade-off for a
+    # laptop-sized research collection; exact duplicates remain exhaustive.
+    candidate_pairs: set[tuple[str, str]] = set()
+    ordered_identifiers = sorted(by_id)
+    if len(ordered_identifiers) <= 10_000:
+        # Keep the small-corpus behavior exhaustive so the fixture pipeline
+        # retains its high-recall near-duplicate contract.
+        candidate_pairs = {
+            (left_id, right_id)
+            for index, left_id in enumerate(ordered_identifiers)
+            for right_id in ordered_identifiers[index + 1 :]
+        }
+    else:
+        bands: dict[tuple[int, int], list[str]] = defaultdict(list)
+        for document in sorted(exact_keepers, key=lambda item: item.document_id):
+            fingerprint_value = fingerprints[document.document_id]
+            for band in range(4):
+                key = (band, (fingerprint_value >> (band * 16)) & 0xFFFF)
+                bands[key].append(document.document_id)
+        for identifiers in bands.values():
+            if len(identifiers) < 2:
                 continue
-            lexical_similarity = shingle_similarity(left.text, right.text)
-            if lexical_similarity < minimum_shingle_similarity:
-                continue
-            union.union(left.document_id, right.document_id)
-            pair_similarity[tuple(sorted((left.document_id, right.document_id)))] = lexical_similarity
+            band_identifiers = sorted(identifiers)
+            for index, left_id in enumerate(band_identifiers):
+                for right_id in band_identifiers[index + 1 :]:
+                    candidate_pairs.add((left_id, right_id))
+
+    for left_id, right_id in sorted(candidate_pairs):
+        left = by_id[left_id]
+        right = by_id[right_id]
+        distance = hamming_distance(fingerprints[left.document_id], fingerprints[right.document_id])
+        if distance > hamming_threshold:
+            continue
+        lexical_similarity = shingle_similarity(left.text, right.text)
+        if lexical_similarity < minimum_shingle_similarity:
+            continue
+        union.union(left.document_id, right.document_id)
+        pair_similarity[tuple(sorted((left.document_id, right.document_id)))] = lexical_similarity
 
     near_groups: dict[str, list[Document]] = defaultdict(list)
-    by_id = {document.document_id: document for document in exact_keepers}
     for document in exact_keepers:
         near_groups[union.find(document.document_id)].append(document)
 

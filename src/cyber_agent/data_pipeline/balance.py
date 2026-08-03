@@ -63,7 +63,13 @@ class BalanceResult:
 
 
 def _priority(seed: int, group_id: str, target: float) -> float:
-    raw = int.from_bytes(hashlib.sha256(f"{seed}:{group_id}".encode("utf-8")).digest()[:8], "big")
+    # Use an independent deterministic domain from dataset splitting. Reusing
+    # the split hash here biases every selected group toward the train range
+    # whenever a balancing cap is reached.
+    raw = int.from_bytes(
+        hashlib.sha256(f"balance:{seed}:{group_id}".encode("utf-8")).digest()[:8],
+        "big",
+    )
     return raw / max(target, 1e-12)
 
 
