@@ -45,6 +45,7 @@ class SourceDefinition:
     acquisition_enabled: bool = False
     maximum_download_bytes: int | None = None
     adapter_options: dict[str, Any] | None = None
+    collection: str = ""
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> SourceDefinition:
@@ -123,6 +124,7 @@ class SourceDefinition:
                 if value.get("maximum_download_bytes") is not None else None
             ),
             adapter_options=value.get("adapter_options", {}),
+            collection=value.get("collection", ""),
         )
 
     def validate(self, license_policy: LicensePolicy) -> list[str]:
@@ -146,6 +148,11 @@ class SourceDefinition:
                 errors.append(f"{self.source_name or '<unnamed>'}: {field_name} is required")
         if self.category not in CATEGORIES:
             errors.append(f"{self.source_name}: unsupported category {self.category}")
+        if self.collection and any(
+            character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+            for character in self.collection
+        ):
+            errors.append(f"{self.source_name}: collection name contains unsupported characters")
         if not self.content_categories or any(category not in CATEGORIES for category in self.content_categories):
             errors.append(f"{self.source_name}: content_categories must contain supported categories")
         if self.category not in self.content_categories:
@@ -189,8 +196,19 @@ class SourceDefinition:
                     raise ValueError
             except ValueError:
                 errors.append(f"{self.source_name}: reviewed_at must be timezone-aware ISO-8601")
-        if approved and (rule is None or rule.status != "allowed"):
-            errors.append(f"{self.source_name}: approved source must have an allowed license")
+        # A local-research source may be explicitly reviewed for bounded private
+        # experimentation even when its terms still need release review (for
+        # example CC-BY-SA attribution/share-alike obligations).  It remains
+        # blocked from audited-release mode by DatasetMode and snapshot notices.
+        approval_usable = rule is not None and (
+            rule.status == "allowed"
+            or (self.local_research_source and rule.status == "review_required")
+        )
+        if approved and not approval_usable:
+            errors.append(
+                f"{self.source_name}: approved source must have allowed terms "
+                "or explicitly local-research-usable review-required terms"
+            )
         if self.enabled and not self.local_research_source and (rule is None or rule.status != "allowed"):
             errors.append(f"{self.source_name}: enabled source must have an allowed license")
         return errors
@@ -243,11 +261,12 @@ class SourceRegistry:
             raise ValueError("; ".join(errors))
         if not source.enabled:
             raise ValueError(f"source is configured as a disabled placeholder: {source_name}")
+        self._require_collection(source)
         if not source.is_approved:
             raise ValueError(f"source review status does not permit ingestion: {source_name} ({source.review_status})")
         if source.adapter not in {
             "local_manifest", "synthetic_tool_examples", "http_archive_text",
-            "http_stix_json", "http_cwe_xml",
+            "http_stix_json", "http_cwe_xml", "http_wikimedia_xml_bz2",
         }:
             raise ValueError(f"source adapter is not an ingestible local manifest: {source.adapter}")
         return source
@@ -261,7 +280,11 @@ class SourceRegistry:
             raise ValueError("; ".join(errors))
         if not source.enabled or not source.is_approved:
             raise ValueError(f"source is not approved for download: {source_name} ({source.review_status})")
-        if source.adapter not in {"http_file", "http_archive", "http_archive_text", "http_stix_json", "http_cwe_xml"}:
+        self._require_collection(source)
+        if source.adapter not in {
+            "http_file", "http_archive", "http_archive_text", "http_stix_json",
+            "http_cwe_xml", "http_wikimedia_xml_bz2",
+        }:
             raise ValueError(f"source has no remote download adapter: {source_name}")
         return source
 
@@ -269,7 +292,7 @@ class SourceRegistry:
         return [
             self.require_ingestible(source.source_name, license_policy)
             for source in self._sources.values()
-            if source.enabled
+            if source.enabled and self._matches_collection(source)
         ]
 
     def acquisition_sources(self, license_policy: LicensePolicy) -> list[SourceDefinition]:
@@ -281,6 +304,7 @@ class SourceRegistry:
             and source.local_research_source
             and source.acquisition_enabled
             and source.adapter.startswith("http_")
+            and self._matches_collection(source)
         ]
 
     def synthetic_sources(self) -> list[SourceDefinition]:
@@ -291,6 +315,7 @@ class SourceRegistry:
             and source.local_research_source
             and source.acquisition_enabled
             and source.adapter == "synthetic_tool_examples"
+            and self._matches_collection(source)
         ]
 
     def all_sources(self) -> list[SourceDefinition]:
@@ -310,3 +335,12 @@ class SourceRegistry:
         except ValueError as exc:
             raise ValueError(f"source manifest resolves outside project: {source.source_name}") from exc
         return path
+
+    def _matches_collection(self, source: SourceDefinition) -> bool:
+        return source.collection == (self.paths.collection or "")
+
+    def _require_collection(self, source: SourceDefinition) -> None:
+        if not self._matches_collection(source):
+            configured = source.collection or "default"
+            active = self.paths.collection or "default"
+            raise ValueError(f"source is configured for collection {configured}, not active collection {active}")

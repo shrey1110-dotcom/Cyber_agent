@@ -26,6 +26,13 @@ from cyber_agent.data_pipeline.split import run_split
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Auditable Cyber Agent training-data pipeline")
     parser.add_argument("--project-root", type=Path, help="project root containing config/ and data/")
+    parser.add_argument(
+        "--collection",
+        help=(
+            "isolated named collection; uses the separately configured research "
+            "budget and never overwrites the default pilot data"
+        ),
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("validate-sources", help="validate source allowlist and license policy")
@@ -38,6 +45,14 @@ def build_parser() -> argparse.ArgumentParser:
     acquire_pilot_parser.add_argument("--seed", type=int, default=42)
     acquire_pilot_parser.add_argument("--source", action="append", dest="sources")
     acquire_pilot_parser.add_argument("--confirm-download", action="store_true")
+    acquire_research_parser = subparsers.add_parser(
+        "acquire-research",
+        help="acquire only explicitly reviewed sources into an isolated named research collection",
+    )
+    acquire_research_parser.add_argument("--target-tokens", required=True, type=int)
+    acquire_research_parser.add_argument("--seed", type=int, default=42)
+    acquire_research_parser.add_argument("--source", action="append", dest="sources")
+    acquire_research_parser.add_argument("--confirm-download", action="store_true")
     ingest = subparsers.add_parser("ingest", help="ingest one or more enabled local sources")
     ingest.add_argument("--source", action="append", dest="sources", help="allowlisted source name")
     ingest.add_argument("--force", action="store_true")
@@ -77,7 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def execute(args: argparse.Namespace) -> Any:
-    config = PipelineConfig.load(args.project_root)
+    config = PipelineConfig.load(args.project_root).for_collection(args.collection)
     if args.command == "validate-sources":
         registry = SourceRegistry.load(config.paths)
         errors = registry.validate(config.license_policy)
@@ -104,6 +119,17 @@ def execute(args: argparse.Namespace) -> Any:
         return acquire_pilot(
             config,
             mode=args.mode,
+            target_tokens=args.target_tokens,
+            seed=args.seed,
+            confirm_download=args.confirm_download,
+            source_names=args.sources,
+        )
+    if args.command == "acquire-research":
+        if not args.collection:
+            raise ValueError("acquire-research requires --collection to isolate its outputs")
+        return acquire_pilot(
+            config,
+            mode="local_research_only",
             target_tokens=args.target_tokens,
             seed=args.seed,
             confirm_download=args.confirm_download,

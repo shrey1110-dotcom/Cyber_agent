@@ -16,7 +16,12 @@ from cyber_agent.data_pipeline.acquisition import (
 from cyber_agent.data_pipeline.config import PipelineConfig
 from cyber_agent.data_pipeline.balance import estimate_pre_tokenizer_tokens
 from cyber_agent.data_pipeline.export import atomic_write_json, read_jsonl
-from cyber_agent.data_pipeline.materialize import materialize_archive, materialize_cwe, materialize_stix
+from cyber_agent.data_pipeline.materialize import (
+    materialize_archive,
+    materialize_cwe,
+    materialize_stix,
+    materialize_wikimedia_xml_bz2,
+)
 from cyber_agent.data_pipeline.sources import SourceDefinition, SourceRegistry
 from cyber_agent.data_pipeline.synthetic import EXAMPLE_KINDS, SAFE_TOOLS, generate_safe_tool_examples
 
@@ -48,6 +53,8 @@ def _materialize_download(
 ) -> dict[str, Any]:
     if source.adapter == "http_stix_json":
         return materialize_stix(config, source, downloaded, token_limit=token_limit)
+    if source.adapter == "http_wikimedia_xml_bz2":
+        return materialize_wikimedia_xml_bz2(config, source, downloaded, token_limit=token_limit)
     extraction = downloaded.parent / "extracted"
     if not extraction.exists():
         safe_extract_archive(

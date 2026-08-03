@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -63,10 +63,22 @@ def default_project_root() -> Path:
 @dataclass(frozen=True, slots=True)
 class PipelinePaths:
     project_root: Path
+    collection: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.collection is not None and (
+            not self.collection
+            or any(
+                character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+                for character in self.collection
+            )
+        ):
+            raise ValueError("collection name must use only letters, digits, dot, underscore, and hyphen")
 
     @property
     def data(self) -> Path:
-        return self.project_root / "data"
+        base = self.project_root / "data"
+        return base if self.collection is None else base / "collections" / self.collection
 
     @property
     def raw(self) -> Path:
@@ -110,7 +122,8 @@ class PipelinePaths:
 
     @property
     def snapshots(self) -> Path:
-        return self.project_root / "artifacts" / "datasets" / "snapshots"
+        base = self.project_root / "artifacts" / "datasets" / "snapshots"
+        return base if self.collection is None else base / self.collection
 
     @property
     def configuration(self) -> Path:
@@ -271,6 +284,7 @@ class PipelineConfig:
     sensitive_data_action: Literal["reject", "redact"]
     license_policy: LicensePolicy
     pilot_budget: PilotBudget
+    research_budget: PilotBudget
     dataset_mode: DatasetMode
 
     @classmethod
@@ -279,6 +293,7 @@ class PipelineConfig:
         settings = _load_json(paths.configuration / "data_pipeline.json")
         raw_policy = _load_json(paths.configuration / "license_policy.json")
         raw_budget = _load_json(paths.configuration / "pilot_budget.json")
+        raw_research_budget = _load_json(paths.configuration / "research_budget.json")
         raw_mode = _load_json(paths.configuration / "dataset_mode.json")
         rules = {
             identifier: LicenseRule(identifier, value["status"], value["attribution_required"])
@@ -298,10 +313,24 @@ class PipelineConfig:
             sensitive_data_action=settings["sensitive_data_action"],
             license_policy=LicensePolicy(int(raw_policy["policy_version"]), rules),
             pilot_budget=PilotBudget.from_dict(raw_budget),
+            research_budget=PilotBudget.from_dict(raw_research_budget),
             dataset_mode=DatasetMode.from_dict(raw_mode),
         )
         config.paths.ensure_directories()
         return config
+
+    def for_collection(self, collection: str | None) -> PipelineConfig:
+        """Return an isolated collection configuration without mutating pilot outputs.
+
+        Named collections deliberately use the separately reviewed research budget.
+        The default (``None``) retains the small fixture/pilot budget so existing
+        snapshots and training manifests cannot be changed accidentally.
+        """
+        if collection is None:
+            return self
+        scoped_paths = PipelinePaths(self.paths.project_root, collection)
+        scoped_paths.ensure_directories()
+        return replace(self, paths=scoped_paths, pilot_budget=self.research_budget)
 
     def fingerprint_payload(self) -> dict[str, Any]:
         return {
@@ -319,6 +348,7 @@ class PipelineConfig:
         return {
             **self.fingerprint_payload(),
             "pilot_budget": self.pilot_budget.to_dict(),
+            "collection": self.paths.collection,
             "dataset_mode": self.dataset_mode.to_dict(),
         }
 

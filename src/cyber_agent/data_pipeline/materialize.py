@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import bz2
+import html
 import json
 import os
 import re
 import shutil
 import tempfile
+import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Iterable
 
 from cyber_agent.data_pipeline.balance import estimate_pre_tokenizer_tokens
 from cyber_agent.data_pipeline.config import PipelineConfig
-from cyber_agent.data_pipeline.export import atomic_write_json, atomic_write_jsonl
+from cyber_agent.data_pipeline.export import atomic_write_json
+from cyber_agent.data_pipeline.schemas import canonical_json
 from cyber_agent.data_pipeline.sources import SourceDefinition
 
 
@@ -25,6 +29,44 @@ CODE_EXTENSIONS = frozenset({
     ".py", ".sh", ".bash", ".go", ".rs", ".c", ".h", ".cc", ".cpp",
     ".ps1", ".json", ".yaml", ".yml", ".dockerfile",
 })
+WIKITEXT_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+WIKITEXT_TEMPLATE = re.compile(r"\{\{[^{}]*\}\}")
+WIKITEXT_REFERENCE = re.compile(r"<ref(?:\s[^>]*)?>.*?</ref\s*>", re.IGNORECASE | re.DOTALL)
+WIKITEXT_TAG = re.compile(
+    r"</?(?:ref|references|gallery|timeline|math|score|syntaxhighlight|source|pre|nowiki)(?:\s[^>]*)?>",
+    re.IGNORECASE,
+)
+WIKITEXT_LINK_WITH_LABEL = re.compile(r"\[\[[^\]|]+\|([^\]]+)\]\]")
+WIKITEXT_LINK = re.compile(r"\[\[([^\]]+)\]\]")
+WIKITEXT_EXTERNAL_LINK = re.compile(r"\[https?://[^\s\]]+\s+([^\]]+)\]")
+WIKITEXT_HEADING = re.compile(r"^\s*=+\s*(.*?)\s*=+\s*$", re.MULTILINE)
+
+
+def _wikitext_to_plain_text(value: str) -> str:
+    """Apply a deliberately conservative, non-executing MediaWiki cleanup.
+
+    It is not a renderer.  It only strips common structural syntax before the
+    normal Phase 2 text/quality pipeline runs, preserving article prose and
+    source attribution while avoiding template-heavy navigation text.
+    """
+    text = WIKITEXT_COMMENT.sub("", value)
+    text = WIKITEXT_REFERENCE.sub("", text)
+    # Repeatedly remove innermost templates; a bound prevents adversarially
+    # deep markup from consuming unbounded CPU.
+    for _ in range(64):
+        updated = WIKITEXT_TEMPLATE.sub("", text)
+        if updated == text:
+            break
+        text = updated
+    text = WIKITEXT_TAG.sub("", text)
+    text = WIKITEXT_EXTERNAL_LINK.sub(r"\1", text)
+    text = WIKITEXT_LINK_WITH_LABEL.sub(r"\1", text)
+    text = WIKITEXT_LINK.sub(r"\1", text)
+    text = WIKITEXT_HEADING.sub(r"\1", text)
+    text = re.sub(r"(?m)^\s*__[A-Z_]+__\s*$", "", text)
+    text = re.sub(r"(?m)^\s*[*#:;]+\s*", "", text)
+    text = re.sub(r"(?m)^\s*\|[-+}]?.*$", "", text)
+    return html.unescape(text).strip()
 
 
 def _safe_text(path: Path, maximum_bytes: int) -> str | None:
@@ -121,7 +163,6 @@ def _write_records(
     count = 0
     estimated_tokens = 0
     stop_reason = "input_exhausted"
-    manifest_rows: list[dict[str, Any]] = []
     maximum_tokens = min(
         config.pilot_budget.maximum_tokens_per_source,
         token_limit if token_limit is not None else config.pilot_budget.maximum_tokens_per_source,
@@ -130,46 +171,70 @@ def _write_records(
         assert temporary is not None
         documents = temporary / "documents"
         documents.mkdir()
-        for source_identifier, text, category, metadata in records:
-            tokens = estimate_pre_tokenizer_tokens(text)
-            if count >= config.pilot_budget.maximum_documents_per_source:
-                stop_reason = "maximum_documents_per_source"
-                break
-            if estimated_tokens + tokens > maximum_tokens:
-                stop_reason = "target_estimated_tokens" if token_limit is not None and maximum_tokens == token_limit else "maximum_tokens_per_source"
-                break
-            suffix = ".json" if metadata.get("language") == "json" else ".txt"
-            relative = Path("documents") / f"document-{count:05d}{suffix}"
-            (temporary / relative).write_text(text.rstrip() + "\n", encoding="utf-8")
-            record_metadata = {
-                **metadata,
-                "original_identifier": source_identifier,
-                "stated_license_or_terms": source.license,
-                "local_research_only": True,
-            }
-            if category == "code":
-                record_metadata.setdefault("repository", (source.adapter_options or {}).get("repository", source.homepage))
-                record_metadata.setdefault("revision", (source.adapter_options or {}).get("revision", source.exact_release_or_version))
-                record_metadata.setdefault("detected_licenses", [source.license])
-            manifest_rows.append({
-                "path": relative.as_posix(),
-                "source_url": f"{source.download_location}#{source_identifier}",
-                "source_release": source.exact_release_or_version,
-                "license": source.license,
-                "category": category,
-                "language": "en",
-                "retrieved_at": source.retrieved_at,
-                "media_type": metadata.get("media_type", "text/plain"),
-                "metadata": record_metadata,
-            })
-            count += 1
-            estimated_tokens += tokens
+        # The temporary directory itself is published atomically below.  Writing
+        # the manifest progressively avoids retaining hundreds of thousands of
+        # source records in memory during larger, bounded research collections.
+        with (temporary / "manifest.jsonl").open(
+            "x", encoding="utf-8", newline="\n"
+        ) as manifest:
+            for source_identifier, text, category, metadata in records:
+                tokens = estimate_pre_tokenizer_tokens(text)
+                if count >= config.pilot_budget.maximum_documents_per_source:
+                    stop_reason = "maximum_documents_per_source"
+                    break
+                if estimated_tokens + tokens > maximum_tokens:
+                    stop_reason = (
+                        "target_estimated_tokens"
+                        if token_limit is not None and maximum_tokens == token_limit
+                        else "maximum_tokens_per_source"
+                    )
+                    break
+                suffix = ".json" if metadata.get("language") == "json" else ".txt"
+                relative = Path("documents") / f"document-{count:05d}{suffix}"
+                (temporary / relative).write_text(text.rstrip() + "\n", encoding="utf-8")
+                source_url = metadata.get("source_url")
+                if not isinstance(source_url, str) or not source_url.strip():
+                    source_url = f"{source.download_location}#{source_identifier}"
+                record_metadata = {
+                    **metadata,
+                    "original_identifier": source_identifier,
+                    "stated_license_or_terms": source.license,
+                    "local_research_only": True,
+                }
+                if category == "code":
+                    record_metadata.setdefault(
+                        "repository", (source.adapter_options or {}).get("repository", source.homepage)
+                    )
+                    record_metadata.setdefault(
+                        "revision",
+                        (source.adapter_options or {}).get("revision", source.exact_release_or_version),
+                    )
+                    record_metadata.setdefault("detected_licenses", [source.license])
+                manifest.write(
+                    canonical_json(
+                        {
+                            "path": relative.as_posix(),
+                            "source_url": source_url,
+                            "source_release": source.exact_release_or_version,
+                            "license": source.license,
+                            "category": category,
+                            "language": "en",
+                            "retrieved_at": source.retrieved_at,
+                            "media_type": metadata.get("media_type", "text/plain"),
+                            "metadata": record_metadata,
+                        }
+                    )
+                    + "\n"
+                )
+                count += 1
+                estimated_tokens += tokens
+            manifest.flush()
+            os.fsync(manifest.fileno())
         if count == 0:
             raise ValueError(
                 "source materialization produced no eligible records; "
                 "check the pinned release and configured path/extension filters"
             )
-        atomic_write_jsonl(temporary / "manifest.jsonl", manifest_rows)
         atomic_write_json(temporary / "materialization_report.json", {
             "schema_version": 1,
             "source_name": source.source_name,
@@ -251,6 +316,96 @@ def materialize_stix(
                 "detection": item.get("x_mitre_detection", ""),
             }, ensure_ascii=False, indent=2, sort_keys=True)
             yield identifier, text, "cybersecurity", {"programming_language": "json", "media_type": "application/json", "stix_type": item.get("type")}
+
+    return _write_records(config, source, records(), token_limit=token_limit)
+
+
+def materialize_wikimedia_xml_bz2(
+    config: PipelineConfig,
+    source: SourceDefinition,
+    downloaded: Path,
+    *,
+    token_limit: int | None = None,
+) -> dict[str, Any]:
+    """Stream a reviewed Wikimedia articles dump without extracting an archive.
+
+    The source configuration provides an exact dated dump URL, one declared
+    license, and attribution instructions.  The reader accepts main-namespace
+    pages only, rejects a DTD/entity declaration before parsing, accounts for
+    decompressed bytes, and never evaluates templates, Lua modules, or scripts.
+    """
+    maximum_bytes = config.pilot_budget.maximum_decompressed_bytes
+
+    def records() -> Iterable[tuple[str, str, str, dict[str, Any]]]:
+        decompressed = 0
+        with bz2.open(downloaded, "rb") as stream:
+            head = stream.read(64 * 1024)
+            if b"<!DOCTYPE" in head.upper() or b"<!ENTITY" in head.upper():
+                raise ValueError("Wikimedia XML must not contain DTD or entity declarations")
+
+            class _BoundedReader:
+                def __init__(self, prefix: bytes) -> None:
+                    self._prefix = prefix
+
+                def read(self, size: int = -1) -> bytes:
+                    nonlocal decompressed
+                    if self._prefix:
+                        if size < 0 or size >= len(self._prefix):
+                            chunk, self._prefix = self._prefix, b""
+                        else:
+                            chunk, self._prefix = self._prefix[:size], self._prefix[size:]
+                    else:
+                        chunk = stream.read(size)
+                    decompressed += len(chunk)
+                    if decompressed > maximum_bytes:
+                        raise ValueError("Wikimedia dump exceeds configured decompressed-byte limit")
+                    return chunk
+
+            parser = ET.iterparse(_BoundedReader(head), events=("end",))
+            for _event, page in parser:
+                if page.tag.rsplit("}", 1)[-1] != "page":
+                    continue
+                try:
+                    title = next(
+                        child.text or "" for child in page if child.tag.rsplit("}", 1)[-1] == "title"
+                    )
+                    namespace = next(
+                        child.text or "" for child in page if child.tag.rsplit("}", 1)[-1] == "ns"
+                    )
+                    page_id = next(
+                        child.text or "" for child in page if child.tag.rsplit("}", 1)[-1] == "id"
+                    )
+                    revision = next(
+                        child for child in page if child.tag.rsplit("}", 1)[-1] == "revision"
+                    )
+                    text_element = next(
+                        child for child in revision if child.tag.rsplit("}", 1)[-1] == "text"
+                    )
+                    wiki_text = text_element.text or ""
+                except StopIteration:
+                    page.clear()
+                    continue
+                if (
+                    namespace != "0"
+                    or not page_id
+                    or wiki_text.lstrip().casefold().startswith("#redirect")
+                ):
+                    page.clear()
+                    continue
+                cleaned = _wikitext_to_plain_text(wiki_text)
+                if cleaned:
+                    article_base_url = str(
+                        (source.adapter_options or {}).get("article_base_url", source.homepage)
+                    ).rstrip("/")
+                    yield page_id, cleaned, source.category, {
+                        "media_type": "text/plain",
+                        "original_title": title,
+                        "source_document_id": page_id,
+                        "source_url": f"{article_base_url}/{urllib.parse.quote(title.replace(' ', '_'), safe=':_()')}",
+                        "dump_format": "mediawiki-pages-articles-xml-bz2",
+                        "license_scope": "source-level reviewed Wikimedia project text license",
+                    }
+                page.clear()
 
     return _write_records(config, source, records(), token_limit=token_limit)
 
