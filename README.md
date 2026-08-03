@@ -61,6 +61,13 @@ train-only tokenizer pilot aliases. See
 acquisition requires `--confirm-download`; downloaded data and generated
 artifacts are never committed or pushed.
 
+The next corpus expansion is an isolated, capped `research-150m` collection:
+three exact reviewed Wikimedia educational-dump releases are parsed in a
+streaming, non-executing adapter with attribution retained for every article.
+It is private research only and cannot overwrite the pilot corpus. See [the
+research-150m corpus guide](docs/research_150m_corpus.md) for its hard budgets,
+commands, sources, and still-unresolved licensing/coverage work.
+
 The implemented flow is:
 
 ```text
