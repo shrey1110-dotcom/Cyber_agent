@@ -45,12 +45,23 @@ It can reproduce its taught English, Python, and Linux examples, but it has
 severe held-out overfitting (validation loss 6.1904 on only eight records).
 It is a basic local chat demonstration, not a useful or releasable model.
 
+An isolated `research-150m` collection is now also implemented. It uses its
+own paths, budgets, source binding, and snapshots so it cannot overwrite
+`cyber-pilot-v7`. Its first reviewed inputs are exact 2026-07-01 Simple English
+Wikipedia, English Wikibooks, and English Wikiversity XML/bzip2 dumps under
+recorded CC-BY-SA-4.0 terms. The adapter streams only non-redirect
+main-namespace pages, retains article-level attribution, rejects DTD/entity
+input, limits decompression, and never executes downloaded content. It is an
+unfrozen private-research collection; do not point tokenizer or pretraining
+commands at it until acquisition, the full Phase 2 pipeline, inspection, and a
+new immutable snapshot have completed.
+
 ## Verified state at handoff
 
 The complete test suite passed after the latest acquisition/extraction changes:
 
 ```text
-112 passed in 0.85s
+115 passed in 0.88s
 ```
 
 The prior 86 Phase 1–3 tests are included in that run and still pass. The
@@ -61,6 +72,7 @@ demonstrations:
 data/downloads/
 data/generated/
 data/sources/
+data/collections/research-150m/
 artifacts/datasets/
 ```
 
@@ -442,6 +454,7 @@ without guessing.
 | `docs/data_pipeline.md` | Phase 2 source, cleaning, licensing, deduplication, split, and report guide. |
 | `docs/tokenizer.md` | Phase 3 byte-level tokenizer design, commands, special-token contract, and MLX handoff. |
 | `docs/local_research_pilot.md` | Phase 3.5 acquisition, local-research restrictions, candidate workflow, and publication warnings. |
+| `docs/research_150m_corpus.md` | Isolated bounded research-collection sources, constraints, commands, and open legal/coverage work. |
 | `docs/pilot_corpus.md` | Phase 3.5 review, acquisition controls, balancing, snapshot, candidate, serialization, and export guide. |
 | `docs/HANDOFF.md` | This LLM-oriented continuation report. |
 | `README.md` | Human entry point with project status, setup, security controls, and common commands. |
