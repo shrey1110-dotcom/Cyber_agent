@@ -56,6 +56,16 @@ unfrozen private-research collection; do not point tokenizer or pretraining
 commands at it until acquisition, the full Phase 2 pipeline, inspection, and a
 new immutable snapshot have completed.
 
+That initial collection has now completed its own pipeline and frozen snapshot
+as `research-150m-v1`: 210,496 retained all-general CC-BY-SA-4.0 documents,
+90,000,000 provisional tokens, and a validated 206,288 / 2,099 / 2,109
+train/validation/test split. Its content hash is
+`6d062600705b7234cfd07edb8b6ccb30c8448e9aa55980a31d24002c36f17e6e`.
+Do not confuse its source-acquisition 150M target with final retained tokens,
+and do not train the next model from this general-only snapshot alone. It needs
+reviewed code, Linux, networking, cybersecurity, and terminal sources in a new
+versioned collection/snapshot first.
+
 ## Verified state at handoff
 
 The complete test suite passed after the latest acquisition/extraction changes:

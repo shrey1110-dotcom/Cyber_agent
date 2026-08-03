@@ -30,6 +30,32 @@ additional article-specific notices. This project therefore marks the sources
 It does **not** clear dataset redistribution, commercial use by this project, or
 publication of model weights.
 
+## Observed local run: `research-150m-v1`
+
+The first bounded acquisition completed locally on 2026-08-03. It downloaded
+707,915,056 bytes, materialized 330,844 source records, and stopped at
+149,999,279 provisional source tokens. After UTF-8 validation, secret/PII
+filtering, quality checks, exact/near deduplication, and deterministic
+balancing, the immutable `research-150m-v1` snapshot contains:
+
+- 210,496 retained documents and 90,000,000 provisional tokens;
+- 206,288 train, 2,099 validation, and 2,109 test documents;
+- 318 exact plus 16,247 verified near-duplicate removals; and
+- 8,163 safe rejection records, including 749 sensitive-data/PII rejections.
+
+The final 90M ceiling is the configured `general` category cap, not a download
+failure. The snapshot's checksum-verified content hash is
+`6d062600705b7234cfd07edb8b6ccb30c8448e9aa55980a31d24002c36f17e6e`.
+It is entirely `general` / `CC-BY-SA-4.0`; it must not be treated as the
+balanced final cyber-model corpus or used to justify a production model.
+
+The large run also exercises the bounded-memory implementation: JSONL ingest
+and clean stages stream records into temporary directories before atomic
+publication; exact deduplication remains exhaustive; and large-corpus
+near-duplicate candidates use bounded sampled SimHash bands before full lexical
+verification. Balancing uses a distinct hash namespace from splitting so a
+source cap cannot bias every selected record into the training split.
+
 The full English Wikipedia dump is intentionally not configured: the dated
 2026-07-01 articles dump advertises 26,564,488,717 bytes, well beyond the
 bounded 1.5 GB download budget. The Common Pile and The Stack remain unenabled:
