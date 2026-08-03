@@ -28,13 +28,14 @@ Phase 4 implements the local-only MLX `cyber-decoder-v1` training path: a
 randomly initialized, tied-embedding decoder-only transformer with 50,048,512
 parameters at the 24K pilot vocabulary. It reads only a frozen snapshot's
 training split, validates artifact provenance, checkpoints atomically, and
-evaluates only held-out splits. The current checkpoint is a private,
-one-step research bootstrap—not a useful or releasable model. See
+evaluates only held-out splits. The current checkpoint is a private local
+pilot—not a useful or releasable model. See
 [the training guide](docs/training.md).
 
 `cyber-agent-llm-v0` is a compiled local chat interface for inspecting that
 pilot checkpoint. It is intentionally disconnected from tools, Docker, and the
-network, and its un-instruction-tuned output may be low quality. See
+network, and its tiny instruction-pilot adaptation may overfit and produce
+low-quality output. See
 [the v0 chat guide](docs/chat_v0.md).
 
 For a continuation-oriented description of the current implementation, local

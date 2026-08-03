@@ -24,7 +24,8 @@ immutable snapshots, snapshot-specific tokenizer candidates, model-budget
 estimates, candidate comparison, trusted prompt serialization, and checksums.
 Phase 4 adds a local MLX decoder-only model, a train-split-only block loader,
 AdamW pretraining, immutable safetensors checkpoints, held-out evaluation, and
-an explicit pilot-training gate. It does not add model inference to the agent.
+an explicit pilot-training gate. Phase 4.1 adds a compiled local inspection
+chat interface, still disconnected from the agent and tools.
 
 The current local-research dataset is `cyber-pilot-v7`: 4,679 retained
 documents and 4,081,394 provisional tokens after cleaning, sensitive-data
@@ -35,16 +36,21 @@ exactly with zero unknown-token dependence. The comparison remains
 `insufficient_evidence`: the corpus is below the 10M-token threshold and has
 only 109 held-out/fixed evaluation inputs, not the required 1,000. The target
 random-initialized MLX model is `cyber-decoder-v1` (50,048,512 parameters with
-the v7 24K tokenizer). One 2,048-token pilot update succeeded and was written
-as `pilot-v7-50m-bootstrap-v1`; it is a training-mechanics checkpoint, not a
-useful or releasable model.
+the v7 24K tokenizer). The local `pilot-v7-50m-v0.2-pretrain-v1` continuation
+completed 10,000 updates / 20,480,000 tokens with held-out test loss 3.7373
+(perplexity 41.98). It improved language modeling but did not follow chat
+prompts. A separate local, MIT-licensed, project-authored instruction pilot
+then produced `pilot-v7-50m-v0.4-assistant-loss-v1` from that base checkpoint.
+It can reproduce its taught English, Python, and Linux examples, but it has
+severe held-out overfitting (validation loss 6.1904 on only eight records).
+It is a basic local chat demonstration, not a useful or releasable model.
 
 ## Verified state at handoff
 
 The complete test suite passed after the latest acquisition/extraction changes:
 
 ```text
-106 passed in 0.77s
+112 passed in 0.85s
 ```
 
 The prior 86 Phase 1–3 tests are included in that run and still pass. The
@@ -298,11 +304,20 @@ Verified local pilot execution:
   Silicon. Training loss was 10.5390, gradient norm 11.9467, and one held-out
   validation batch had loss 10.5427. These are initialization-scale mechanics
   measurements, not quality metrics.
+- `pilot-v7-50m-v0.2-pretrain-v1` completed 10,000 updates / 20,480,000
+  tokens. Final validation loss was 3.3882 (perplexity 29.61); frozen test loss
+  was 3.7373 (perplexity 41.98). Raw chat prompts were still repetitive.
+- `pilot-v7-50m-v0.4-assistant-loss-v1` starts from the verified local v0.2
+  checkpoint, resets the optimizer, and trains only assistant-completion
+  targets from the separate 32-record local instruction train split. It answers
+  taught English, Python, and Linux prompts correctly but overfits its tiny
+  corpus. Do not describe it as general English/code ability.
 
 Not complete:
 
-- No long production training run, meaningful capability evaluation, inference
-  server, constrained decoding, or `MLXCyberModelBackend`.
+- No long production training run, meaningful capability evaluation, reviewed
+  large instruction corpus, inference server, constrained decoding, or
+  `MLXCyberModelBackend`.
 - `compile_steps` is intentionally disabled pending measured hardware/memory
   tuning and has no compiled execution path yet.
 
@@ -310,20 +325,23 @@ Not complete:
 
 Implemented:
 
-- `cyber-agent-llm-v0`, a local CLI over the completed v7 step-1000 checkpoint.
+- `cyber-agent-llm-v0`, a local CLI whose default is the v0.4 step-800
+  instruction-pilot checkpoint.
 - Checkpoint checksum, random-initialization, frozen-train provenance, and
   tokenizer-hash verification before model arrays are loaded.
 - A fixed-shape compiled MLX forward pass, greedy decoding, bounded output, and
-  trusted prompt serialization with literal-special-token injection protection.
+  ordinary pretraining-compatible `System:`/`User:`/`Assistant:` labels with
+  literal-special-token injection protection.
 - Interactive `/reset` and `/quit` commands plus a single-prompt CLI mode.
 - No tool invocation, agent-loop connection, Docker execution, host access, or
   network capability in the v0 runtime.
 - Safe future horizon extension: a new run can resume only the same immutable
   plan with a strictly higher `max_steps`; its parent checkpoint is recorded.
 
-Do not describe v0 as a useful assistant. The live pilot demonstration produced
-only a period for a prose prompt, which is expected at this limited training
-scale. It proves local load/compiled generation, not conversational quality.
+Do not describe v0 as a useful assistant. v0.4 can reproduce several taught
+prompts, but its large train/validation gap proves that it has not generalized.
+It proves local load/compiled generation and a narrow chat format, not reliable
+conversation, code generation, or security reasoning.
 
 ## File-by-file map
 
@@ -396,9 +414,10 @@ without guessing.
 | `src/cyber_agent/training/config.py` | Strongly typed, hashable training configuration; validates dimensions and prevents checkpoints outside the project. |
 | `src/cyber_agent/training/model.py` | Randomly initialized MLX causal decoder, attention, SwiGLU blocks, loss, and architecture manifest. No pretrained loading code exists. |
 | `src/cyber_agent/training/data.py` | Validates frozen snapshot/tokenizer provenance and streams only fixed training, validation, or test blocks. Literal control-token strings stay untrusted content. |
-| `src/cyber_agent/training/trainer.py` | Local AdamW training, validation, deterministic setup, metrics, immutable run/checkpoint creation, and resume handling. |
-| `src/cyber_agent/training/checkpoint.py` | Atomic MLX safetensors checkpoint persistence, SHA-256 checksums, and compatibility-checked restoration. |
-| `src/cyber_agent/training/cli.py` | Explicit `inspect-model`, `smoke-train`, `train`, and `evaluate` entry points. The target `train` command requires confirmation. |
+| `src/cyber_agent/training/instruction.py` | Validates the explicit project-authored instruction pilot, renders ordinary-text chat prompts, and creates assistant-only supervised targets; it never reads frozen snapshot validation/test data. |
+| `src/cyber_agent/training/trainer.py` | Local AdamW training, masked assistant-only loss support, validation, deterministic setup, metrics, immutable run/checkpoint creation, and resume handling. |
+| `src/cyber_agent/training/checkpoint.py` | Atomic MLX safetensors checkpoint persistence, SHA-256 checksums, compatibility-checked restoration, and verified local model-only initialization for a separately declared adaptation run. |
+| `src/cyber_agent/training/cli.py` | Explicit `inspect-model`, `smoke-train`, `train`, `tune-instructions`, and `evaluate` entry points. Training/adaptation require confirmation. |
 | `docs/training.md` | Safe operational instructions, current pilot status, artifact semantics, and future agent-backend handoff. |
 | `src/cyber_agent/inference/prompt.py` | Bounded chat history and trusted role-boundary construction; untrusted literal control strings remain data. |
 | `src/cyber_agent/inference/v0.py` | Verified checkpoint/tokenizer loader and fixed-shape compiled MLX greedy-generation runtime. It never invokes tools. |
@@ -416,8 +435,10 @@ without guessing.
 | `config/pilot_budget.json` | Download, document, estimated-token, source, category, archive, timeout, retry, and target limits. |
 | `config/data_pipeline.json` | Phase 2 cleaning, quality, deduplication, split, and seed configuration. |
 | `config/tokenizer.json` | Byte-level BPE settings, 16K/24K/32K candidates, 24K default, special tokens, and train path. |
+| `config/training_instruction_v0.json` | Bounded v0.4 local instruction-pilot hyperparameters; uses batch size one and a lower learning rate, and remains research-only. |
 | `fixtures/sample_corpus/` | Tiny accepted/rejected Phase 2 fixture corpus, manifest, and CC0 fixture license. |
 | `fixtures/tokenizer_evaluation.jsonl` | Held-out tokenizer examples for commands, code, JSON/YAML, paths, addresses, identifiers, logs, and Unicode. |
+| `fixtures/instruction_pilot_v0.jsonl` | Versioned MIT-licensed, project-authored 32-train/8-validation chat-format pilot. It is deliberately too small for production and must not be expanded with unreviewed content. |
 | `docs/data_pipeline.md` | Phase 2 source, cleaning, licensing, deduplication, split, and report guide. |
 | `docs/tokenizer.md` | Phase 3 byte-level tokenizer design, commands, special-token contract, and MLX handoff. |
 | `docs/local_research_pilot.md` | Phase 3.5 acquisition, local-research restrictions, candidate workflow, and publication warnings. |
@@ -433,6 +454,7 @@ without guessing.
 | `tests/test_phase35_sources_acquisition.py` | Review/release enforcement, download budget/resume/redirect/atomicity, and archive safety coverage. |
 | `tests/test_phase35_balance_snapshot.py` | Deterministic balancing, provisional estimator, immutable snapshots, checksum verification, and attestation coverage. |
 | `tests/test_phase35_tokenizer_serialization.py` | Frozen candidates, exact metrics, evidence-gated comparison, model budget, trusted serialization, injection safety, and export confirmation coverage. |
+| `tests/test_instruction_pilot.py` | Project-authored instruction source/license enforcement, train/validation separation, literal special-token safety, assistant-only target-mask alignment, and duplicate-ID rejection. |
 | `tests/conftest.py` | Builds isolated temporary Phase 2/tokenizer projects for integration tests. |
 | `pyproject.toml` | Package metadata, Python version, `tokenizers` dependency, pytest settings, and CLI entry points. |
 | `uv.lock` | Reproducible dependency lockfile. |

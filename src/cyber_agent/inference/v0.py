@@ -22,8 +22,8 @@ from cyber_agent.tokenizer.loader import CyberTokenizer
 from cyber_agent.training.model import CyberDecoderModel, ModelConfig
 
 
-DEFAULT_V0_RUN_NAME = "pilot-v7-50m-bootstrap-v1"
-DEFAULT_V0_STEP = 1000
+DEFAULT_V0_RUN_NAME = "pilot-v7-50m-v0.4-assistant-loss-v1"
+DEFAULT_V0_STEP = 800
 
 
 def _inside(path: Path, root: Path, *, label: str) -> Path:
@@ -52,6 +52,7 @@ class V0RuntimeInfo:
     checkpoint_step: int
     local_research_only: bool
     weight_publication_allowed: bool
+    prompt_format: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -64,6 +65,7 @@ class V0RuntimeInfo:
             "checkpoint_step": self.checkpoint_step,
             "local_research_only": self.local_research_only,
             "weight_publication_allowed": self.weight_publication_allowed,
+            "prompt_format": self.prompt_format,
             "tool_execution_enabled": False,
             "network_access_enabled": False,
             "warning": "Pilot-only checkpoint: output is for local inspection, not security advice or autonomous actions.",
@@ -84,7 +86,11 @@ class LocalV0ChatModel:
         self.model = model
         self.tokenizer = tokenizer
         self.info = info
-        self.history = ChatHistory(tokenizer, context_length=model.config.context_length)
+        self.history = ChatHistory(
+            tokenizer,
+            context_length=model.config.context_length,
+            prompt_format=info.prompt_format,
+        )
         self._forward = mx.compile(lambda token_ids: self.model(token_ids)) if compiled else self.model
 
     @classmethod
@@ -149,6 +155,7 @@ class LocalV0ChatModel:
             checkpoint_step=int(checkpoint_manifest.get("step", -1)),
             local_research_only=bool(training_data.get("local_research_only")),
             weight_publication_allowed=bool(run_manifest.get("weight_publication_allowed")),
+            prompt_format="plain_v0",
         )
         return cls(model=model, tokenizer=tokenizer, info=info, compiled=compiled)
 
@@ -157,6 +164,7 @@ class LocalV0ChatModel:
             self.tokenizer,
             context_length=self.model.config.context_length,
             system_prompt=system_prompt,
+            prompt_format=self.info.prompt_format,
         )
 
     def reply(self, user_text: str, *, max_new_tokens: int = 64) -> str:

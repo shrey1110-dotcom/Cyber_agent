@@ -3,24 +3,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from cyber_agent.tokenizer.loader import CyberTokenizer
 from cyber_agent.tokenizer.serialization import PromptComponent, TrustedPromptSerializer
 
 
 DEFAULT_SYSTEM_PROMPT = (
-    "You are cyber-agent-llm-v0, a local research language-model checkpoint. "
-    "Reply with plain text. You cannot execute tools, access files, or make network requests."
+    "You are cyber-agent-llm-v0, a local research assistant. Answer clearly in plain text. "
+    "You cannot execute tools, access files, or make network requests."
 )
+
+PromptFormat = Literal["plain_v0", "trusted_v1"]
 
 
 @dataclass(slots=True)
 class ChatHistory:
-    """Conversation state whose role markers are inserted only by the serializer."""
+    """Conversation state with an explicit, provenance-matched prompt format."""
 
     tokenizer: CyberTokenizer
     context_length: int
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    prompt_format: PromptFormat = "plain_v0"
     _messages: list[PromptComponent] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -28,6 +32,8 @@ class ChatHistory:
             raise ValueError("context_length must be at least 8")
         if not self.system_prompt.strip():
             raise ValueError("system_prompt must not be empty")
+        if self.prompt_format not in {"plain_v0", "trusted_v1"}:
+            raise ValueError("prompt_format must be plain_v0 or trusted_v1")
         if not self._messages:
             self._messages.append(PromptComponent("system", self.system_prompt))
 
@@ -49,11 +55,21 @@ class ChatHistory:
             raise ValueError("chat input must contain non-whitespace text")
         self._messages.append(PromptComponent("user", user_text))
         components = [*self._messages, PromptComponent("assistant", "")]
-        token_ids = TrustedPromptSerializer(self.tokenizer).serialize(
-            components,
-            add_bos=True,
-            add_eos=False,
-        )
+        if self.prompt_format == "trusted_v1":
+            token_ids = TrustedPromptSerializer(self.tokenizer).serialize(
+                components,
+                add_bos=True,
+                add_eos=False,
+            )
+        else:
+            # v0 never trained the role-control embeddings.  Plain labels are
+            # ordinary text from the same distribution as its pretraining data.
+            labels = {"system": "System", "user": "User", "assistant": "Assistant"}
+            rendered = "\n\n".join(
+                f"{labels[component.kind]}: {component.canonical_content()}"
+                for component in components
+            )
+            token_ids = self.tokenizer.encode(rendered, add_bos=True, parse_special_tokens=False)
         return self._truncate(token_ids)
 
     def record_assistant(self, response: str) -> None:
