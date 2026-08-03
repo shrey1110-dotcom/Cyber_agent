@@ -16,10 +16,15 @@ from mlx.utils import tree_map
 
 from cyber_agent.data_pipeline.export import atomic_write_json, atomic_write_text
 from cyber_agent.data_pipeline.schemas import utc_now
-from cyber_agent.training.checkpoint import load_checkpoint, save_checkpoint
+from cyber_agent.training.checkpoint import load_checkpoint, load_model_weights_only, save_checkpoint
 from cyber_agent.training.config import TrainingConfig
 from cyber_agent.training.data import TrainingArtifacts
-from cyber_agent.training.model import CyberDecoderModel, ModelConfig, causal_language_model_loss
+from cyber_agent.training.model import (
+    CyberDecoderModel,
+    ModelConfig,
+    causal_language_model_loss,
+    masked_causal_language_model_loss,
+)
 
 
 def _learning_rate_schedule(config: TrainingConfig):
@@ -38,7 +43,7 @@ def _mean_gradients(accumulated: Any, count: int) -> Any:
 @dataclass(slots=True)
 class PretrainingRun:
     config: TrainingConfig
-    artifacts: TrainingArtifacts
+    artifacts: Any
     run_name: str
     model: CyberDecoderModel
     optimizer: Any
@@ -56,6 +61,7 @@ class PretrainingRun:
         artifacts: TrainingArtifacts,
         run_name: str,
         resume_checkpoint: Path | None = None,
+        base_checkpoint: Path | None = None,
         allow_finished_checkpoint: bool = False,
         allow_horizon_extension: bool = False,
     ) -> "PretrainingRun":
@@ -79,7 +85,16 @@ class PretrainingRun:
             run_directory.relative_to(config.project_root)
         except ValueError as exc:
             raise ValueError("run directory escapes the project root") from exc
+        if resume_checkpoint is not None and base_checkpoint is not None:
+            raise ValueError("a run may resume a checkpoint or adapt a base checkpoint, but not both")
         model_architecture = model.architecture_manifest()
+        base_checkpoint_provenance: dict[str, Any] | None = None
+        if base_checkpoint is not None:
+            base_checkpoint_provenance = load_model_weights_only(
+                path=base_checkpoint,
+                model=model,
+                expected_model_architecture=model_architecture,
+            )
         run_manifest = {
             "schema_version": 1,
             "run_name": run_name,
@@ -93,6 +108,7 @@ class PretrainingRun:
             "weight_publication_allowed": bool(artifacts.provenance()["weight_publication_allowed"]),
             "random_initialization": {"seed": config.seed, "pretrained_weights_loaded": False},
             "resume_checkpoint": str(resume_checkpoint) if resume_checkpoint else None,
+            "base_checkpoint": base_checkpoint_provenance,
         }
         if run_directory.exists() and resume_checkpoint is None:
             raise ValueError("run directory already exists; choose a new run name or resume from an immutable checkpoint")
@@ -144,7 +160,7 @@ class PretrainingRun:
             }
             atomic_write_json(self.run_directory / "run_manifest.json", self.run_manifest)
 
-    def _train_batches(self) -> Iterator[tuple[mx.array, mx.array]]:
+    def _train_batches(self) -> Iterator[tuple[mx.array, ...]]:
         while True:
             produced = False
             for batch in self.artifacts.batches(
@@ -155,12 +171,18 @@ class PretrainingRun:
             if not produced:
                 raise ValueError("frozen train split does not produce a full training batch at this context/batch size")
 
-    def _step(self, batches: Iterator[tuple[mx.array, mx.array]]) -> dict[str, float | int]:
+    def _step(self, batches: Iterator[tuple[mx.array, ...]]) -> dict[str, float | int]:
         accumulated_grads: Any | None = None
         loss_values: list[mx.array] = []
         for _ in range(self.config.gradient_accumulation_steps):
-            inputs, targets = next(batches)
-            loss, gradients = nn.value_and_grad(self.model, causal_language_model_loss)(self.model, inputs, targets)
+            batch = next(batches)
+            inputs, targets = batch[0], batch[1]
+            if len(batch) == 3:
+                loss, gradients = nn.value_and_grad(self.model, masked_causal_language_model_loss)(
+                    self.model, inputs, targets, batch[2]
+                )
+            else:
+                loss, gradients = nn.value_and_grad(self.model, causal_language_model_loss)(self.model, inputs, targets)
             accumulated_grads = gradients if accumulated_grads is None else tree_map(
                 lambda first, second: first + second, accumulated_grads, gradients
             )
@@ -184,18 +206,25 @@ class PretrainingRun:
         losses: list[float] = []
         correct = 0
         token_count = 0
-        for batch_number, (inputs, targets) in enumerate(
+        for batch_number, batch in enumerate(
             self.artifacts.batches(split, sequence_length=self.config.context_length, batch_size=self.config.batch_size),
             start=1,
         ):
+            inputs, targets = batch[0], batch[1]
+            weights = batch[2] if len(batch) == 3 else None
             logits = self.model(inputs)
-            loss = nn.losses.cross_entropy(logits, targets, reduction="mean")
+            if weights is None:
+                loss = nn.losses.cross_entropy(logits, targets, reduction="mean")
+            else:
+                unmasked_loss = nn.losses.cross_entropy(logits, targets, reduction="none")
+                denominator = mx.maximum(mx.sum(weights), mx.array(1.0, dtype=unmasked_loss.dtype))
+                loss = mx.sum(unmasked_loss * weights) / denominator
             predictions = mx.argmax(logits, axis=-1)
-            matches = mx.sum(predictions == targets)
+            matches = mx.sum((predictions == targets).astype(mx.float32) if weights is None else (predictions == targets).astype(mx.float32) * weights)
             mx.eval(loss, matches)
             losses.append(float(loss.item()))
             correct += int(matches.item())
-            token_count += int(targets.size)
+            token_count += int(targets.size if weights is None else mx.sum(weights).item())
             if maximum_batches is not None and batch_number >= maximum_batches:
                 break
         if not losses:

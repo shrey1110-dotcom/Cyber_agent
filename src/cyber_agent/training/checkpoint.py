@@ -132,6 +132,45 @@ def load_checkpoint(
     }
 
 
+def load_model_weights_only(
+    *,
+    path: str | Path,
+    model: Any,
+    expected_model_architecture: dict[str, Any],
+) -> dict[str, Any]:
+    """Load a verified local parent model for a new, separately audited phase.
+
+    This deliberately does *not* restore the optimizer, step number, or prior
+    training configuration.  It is for an explicitly declared adaptation run,
+    not an unsafe way to alter or continue a pretraining checkpoint.
+    """
+    directory = Path(path).resolve()
+    manifest_path = directory / "checkpoint_manifest.json"
+    try:
+        checkpoint = json.loads(manifest_path.read_text(encoding="utf-8"))
+        run_manifest = json.loads((directory / "run_manifest.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"parent checkpoint is incomplete or invalid: {exc}") from exc
+    for name, expected_hash in checkpoint.get("checksums", {}).items():
+        if not isinstance(name, str) or not isinstance(expected_hash, str) or sha256_file(directory / name) != expected_hash:
+            raise ValueError(f"parent checkpoint checksum mismatch: {name}")
+    if run_manifest.get("model_architecture") != expected_model_architecture:
+        raise ValueError("parent checkpoint model architecture does not match the adaptation configuration")
+    runtime = run_manifest.get("runtime")
+    if not isinstance(runtime, dict) or runtime.get("pretrained_model_used") is not False:
+        raise ValueError("parent checkpoint does not establish local random-initialization provenance")
+    model.update(tree_unflatten(mx.load(directory / "model.safetensors")))
+    mx.eval(model.parameters())
+    return {
+        "checkpoint": str(directory),
+        "checkpoint_hash": str(checkpoint.get("checksums", {}).get("model.safetensors", "")),
+        "parent_run_name": run_manifest.get("run_name"),
+        "parent_run_manifest_hash": hashlib.sha256(
+            json.dumps(run_manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+    }
+
+
 def _load_metrics(path: Path) -> list[dict[str, Any]]:
     try:
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]

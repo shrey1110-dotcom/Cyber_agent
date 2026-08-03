@@ -147,3 +147,21 @@ def causal_language_model_loss(model: CyberDecoderModel, inputs: mx.array, targe
     """Mean next-token cross entropy for fixed-length, non-padding blocks."""
     logits = model(inputs)
     return nn.losses.cross_entropy(logits, targets, reduction="mean")
+
+
+def masked_causal_language_model_loss(
+    model: CyberDecoderModel,
+    inputs: mx.array,
+    targets: mx.array,
+    target_weights: mx.array,
+) -> mx.array:
+    """Next-token loss over explicitly supervised target positions only.
+
+    Instruction prompts are context, not desired completions.  The caller must
+    provide a zero/one mask that selects assistant-response tokens and excludes
+    prompt and padding positions.
+    """
+    logits = model(inputs)
+    losses = nn.losses.cross_entropy(logits, targets, reduction="none")
+    denominator = mx.maximum(mx.sum(target_weights), mx.array(1.0, dtype=losses.dtype))
+    return mx.sum(losses * target_weights) / denominator

@@ -10,6 +10,7 @@ from typing import Any
 
 from cyber_agent.training.config import TrainingConfig
 from cyber_agent.training.data import TrainingArtifacts
+from cyber_agent.training.instruction import InstructionTrainingArtifacts
 from cyber_agent.training.trainer import PretrainingRun
 
 
@@ -44,6 +45,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     train.add_argument("--allow-pilot-artifacts", action="store_true")
     train.add_argument("--confirm-start", action="store_true")
+
+    tune = subparsers.add_parser(
+        "tune-instructions",
+        help="adapt a verified local checkpoint on an explicit, auditable local instruction corpus",
+    )
+    tune.add_argument("--snapshot", required=True)
+    tune.add_argument("--tokenizer", type=Path, required=True)
+    tune.add_argument("--base-checkpoint", type=Path, required=True)
+    tune.add_argument("--instruction-dataset", type=Path, required=True)
+    tune.add_argument("--run-name", required=True)
+    tune.add_argument("--max-steps", type=int)
+    tune.add_argument("--evaluation-max-batches", type=int)
+    tune.add_argument("--allow-pilot-artifacts", action="store_true")
+    tune.add_argument("--confirm-start", action="store_true")
 
     smoke = subparsers.add_parser("smoke-train", help="run a tiny, non-production local mechanics check")
     smoke.add_argument("--snapshot", required=True)
@@ -119,6 +134,38 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             max_steps=args.max_steps,
             maximum_evaluation_batches=args.evaluation_max_batches,
         )
+
+    if args.command == "tune-instructions":
+        if not args.confirm_start:
+            raise ValueError("instruction adaptation has not started; pass --confirm-start after reviewing its dataset and base checkpoint")
+        if args.evaluation_max_batches is not None and args.evaluation_max_batches < 1:
+            raise ValueError("--evaluation-max-batches must be positive")
+        base_checkpoint = args.base_checkpoint.resolve()
+        try:
+            base_checkpoint.relative_to(root / "artifacts" / "training")
+        except ValueError as exc:
+            raise ValueError("base checkpoint must remain inside artifacts/training") from exc
+        base = TrainingArtifacts.load(
+            project_root=root, snapshot_name=args.snapshot, tokenizer_path=args.tokenizer, allow_pilot_artifacts=allow_pilot
+        )
+        artifacts = InstructionTrainingArtifacts.load(
+            project_root=root,
+            base=base,
+            dataset_path=args.instruction_dataset,
+        )
+        run = PretrainingRun.create(
+            config=config,
+            artifacts=artifacts,
+            run_name=args.run_name,
+            base_checkpoint=base_checkpoint,
+        )
+        return {
+            **run.train(
+                max_steps=args.max_steps,
+                maximum_evaluation_batches=args.evaluation_max_batches,
+            ),
+            "training_mode": "local_instruction_adaptation",
+        }
 
     if args.command == "evaluate":
         try:

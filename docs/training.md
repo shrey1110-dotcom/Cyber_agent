@@ -82,6 +82,53 @@ memory/performance tuning are deferred until the production context length,
 batch size, and hardware budget are measured; a future implementation must
 record any compiled execution configuration in the immutable run manifest.
 
+`config/training_v0_1.json` is the exact, reviewable continuation plan for the
+local v0.1 experiment. It differs from the completed v0 plan only by increasing
+`max_steps` from 1,000 to 3,000; it may resume the step-1,000 checkpoint only
+with `--allow-horizon-extension` and a new run name. This trains more approved
+technical English and code but is not chat instruction tuning.
+
+`config/training_v0_2.json` extends only the v0.1 step horizon to 10,000. It
+is an intentionally bounded language/code pretraining experiment, not a claim
+that repeated pilot data will create a capable chat model.
+
+## Local instruction-pilot adaptation
+
+`fixtures/instruction_pilot_v0.jsonl` is a small, versioned, project-authored
+MIT-licensed set of 32 training and eight held-out validation conversations. It
+teaches the same ordinary-text `System:`, `User:`, and `Assistant:` format used
+by the v0 runtime. It is deliberately separate from the frozen pretraining
+snapshot: snapshot validation/test records are never used to tune chat output.
+It is a narrow local usability experiment, not a substitute for a reviewed
+instruction corpus or a production safety evaluation.
+
+The adaptation starts from a checksum-verified local 10,000-step checkpoint,
+loads model weights only, resets its optimizer and step count, and writes a new
+immutable run with the parent checkpoint and instruction-dataset SHA-256 in
+its manifest:
+
+```bash
+uv run cyber-train --config config/training_instruction_v0.json tune-instructions \
+  --snapshot cyber-pilot-v7 \
+  --tokenizer artifacts/tokenizers/candidates/cyber-pilot-v7/24000/tokenizer.json \
+  --base-checkpoint artifacts/training/pilot-v7-50m-v0.2-pretrain-v1/checkpoints/step-00010000 \
+  --instruction-dataset fixtures/instruction_pilot_v0.jsonl \
+  --run-name pilot-v7-50m-v0.4-assistant-loss-v1 \
+  --allow-pilot-artifacts --confirm-start
+```
+
+This command accepts no arbitrary external dataset or URL. It fails if the
+dataset escapes the repository, lacks MIT license metadata, uses a source other
+than the reviewed project-authored pilot source, has duplicate IDs, or lacks a
+separate local validation split. The model still cannot execute tools; Phase 1
+policy and Docker controls remain outside the model.
+
+The resulting v0.4 pilot reached 0.0021 training loss but 6.1904 loss on the
+eight-record held-out instruction split. It can reproduce the taught basic
+English, Python, and Linux examples, but that large train/validation gap means
+it is **not** a generally reliable chat or coding model. More repetitions of
+this 40-record file are not an appropriate next step.
+
 ## Later agent integration
 
 The training package deliberately does not implement inference serving or
