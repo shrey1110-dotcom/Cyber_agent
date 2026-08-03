@@ -302,9 +302,28 @@ Verified local pilot execution:
 Not complete:
 
 - No long production training run, meaningful capability evaluation, inference
-  server, generation sampler, constrained decoding, or `MLXCyberModelBackend`.
+  server, constrained decoding, or `MLXCyberModelBackend`.
 - `compile_steps` is intentionally disabled pending measured hardware/memory
   tuning and has no compiled execution path yet.
+
+### Phase 4.1 — compiled local v0 chat: inspection interface complete
+
+Implemented:
+
+- `cyber-agent-llm-v0`, a local CLI over the completed v7 step-1000 checkpoint.
+- Checkpoint checksum, random-initialization, frozen-train provenance, and
+  tokenizer-hash verification before model arrays are loaded.
+- A fixed-shape compiled MLX forward pass, greedy decoding, bounded output, and
+  trusted prompt serialization with literal-special-token injection protection.
+- Interactive `/reset` and `/quit` commands plus a single-prompt CLI mode.
+- No tool invocation, agent-loop connection, Docker execution, host access, or
+  network capability in the v0 runtime.
+- Safe future horizon extension: a new run can resume only the same immutable
+  plan with a strictly higher `max_steps`; its parent checkpoint is recorded.
+
+Do not describe v0 as a useful assistant. The live pilot demonstration produced
+only a period for a prose prompt, which is expected at this limited training
+scale. It proves local load/compiled generation, not conversational quality.
 
 ## File-by-file map
 
@@ -381,6 +400,10 @@ without guessing.
 | `src/cyber_agent/training/checkpoint.py` | Atomic MLX safetensors checkpoint persistence, SHA-256 checksums, and compatibility-checked restoration. |
 | `src/cyber_agent/training/cli.py` | Explicit `inspect-model`, `smoke-train`, `train`, and `evaluate` entry points. The target `train` command requires confirmation. |
 | `docs/training.md` | Safe operational instructions, current pilot status, artifact semantics, and future agent-backend handoff. |
+| `src/cyber_agent/inference/prompt.py` | Bounded chat history and trusted role-boundary construction; untrusted literal control strings remain data. |
+| `src/cyber_agent/inference/v0.py` | Verified checkpoint/tokenizer loader and fixed-shape compiled MLX greedy-generation runtime. It never invokes tools. |
+| `src/cyber_agent/inference/cli.py` | `cyber-chat-v0` info, one-prompt, and interactive local-only chat interface. |
+| `docs/chat_v0.md` | v0 commands, compilation design, limitations, and safe training-continuation procedure. |
 
 ### Configuration, documentation, fixtures, and tests
 
@@ -623,7 +646,7 @@ measuring the intended Apple Silicon hardware.
 
 Scale only after the corpus/tokenizer gates pass. Add learning-rate/throughput
 experiments, held-out loss tracking, deterministic resume tests on target
-hardware, a generation sampler, capability/safety evaluation, and then
+hardware, sampling strategy evaluation, capability/safety evaluation, and then
 `MLXCyberModelBackend`. The backend must return strict action JSON and use the
 trusted serializer. It must not bypass policy validation or Docker execution.
 

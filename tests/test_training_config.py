@@ -31,3 +31,13 @@ def test_training_configuration_rejects_checkpoint_escape(tmp_path: Path) -> Non
     with pytest.raises(ValueError, match="inside the project root"):
         TrainingConfig.from_dict(payload, project_root=tmp_path)
 
+
+def test_only_max_steps_may_change_for_safe_horizon_extension() -> None:
+    root = Path(__file__).resolve().parents[1]
+    original = TrainingConfig.load(root / "config" / "training.json", project_root=root)
+    continued = original.with_overrides(max_steps=2_000)
+    changed_optimizer = original.with_overrides(max_steps=2_000, learning_rate=0.0002)
+
+    assert continued.is_safe_horizon_extension_of(original.resolved_dict()) is True
+    assert changed_optimizer.is_safe_horizon_extension_of(original.resolved_dict()) is False
+    assert original.is_safe_horizon_extension_of(continued.resolved_dict()) is False

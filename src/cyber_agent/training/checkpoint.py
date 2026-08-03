@@ -16,6 +16,7 @@ from mlx.utils import tree_flatten, tree_unflatten
 from cyber_agent.data_pipeline.export import atomic_write_json, atomic_write_text
 from cyber_agent.data_pipeline.schemas import utc_now
 from cyber_agent.tokenizer.corpus import sha256_file
+from cyber_agent.training.config import TrainingConfig
 
 
 def _flatten(tree: Any) -> dict[str, mx.array]:
@@ -82,7 +83,14 @@ def save_checkpoint(
             shutil.rmtree(temporary)
 
 
-def load_checkpoint(*, path: str | Path, model: Any, optimizer: Any, expected_run_manifest: dict[str, Any]) -> dict[str, Any]:
+def load_checkpoint(
+    *,
+    path: str | Path,
+    model: Any,
+    optimizer: Any,
+    expected_run_manifest: dict[str, Any],
+    allow_horizon_extension: bool = False,
+) -> dict[str, Any]:
     directory = Path(path).resolve()
     manifest_path = directory / "checkpoint_manifest.json"
     try:
@@ -93,13 +101,35 @@ def load_checkpoint(*, path: str | Path, model: Any, optimizer: Any, expected_ru
     for name, expected_hash in checkpoint.get("checksums", {}).items():
         if not isinstance(name, str) or not isinstance(expected_hash, str) or sha256_file(directory / name) != expected_hash:
             raise ValueError(f"checkpoint checksum mismatch: {name}")
-    for key in ("training_data", "training_configuration_hash", "model_architecture"):
+    for key in ("training_data", "model_architecture"):
         if run_manifest.get(key) != expected_run_manifest.get(key):
             raise ValueError(f"checkpoint is incompatible with current run: {key}")
+    same_training_config = run_manifest.get("training_configuration_hash") == expected_run_manifest.get(
+        "training_configuration_hash"
+    )
+    if not same_training_config:
+        previous_config = run_manifest.get("training_configuration")
+        current_config = expected_run_manifest.get("training_configuration")
+        if not (
+            allow_horizon_extension
+            and isinstance(previous_config, dict)
+            and isinstance(current_config, dict)
+            and TrainingConfig.from_dict(
+                current_config,
+                project_root=Path(str(current_config.get("project_root", ""))),
+            ).is_safe_horizon_extension_of(previous_config)
+        ):
+            raise ValueError("checkpoint is incompatible with current run: training_configuration_hash")
     model.update(tree_unflatten(mx.load(directory / "model.safetensors")))
     optimizer.state = tree_unflatten(mx.load(directory / "optimizer.safetensors"))
     mx.eval(model.parameters(), optimizer.state)
-    return {"step": int(checkpoint["step"]), "metrics": _load_metrics(directory / "metrics.jsonl")}
+    return {
+        "step": int(checkpoint["step"]),
+        "metrics": _load_metrics(directory / "metrics.jsonl"),
+        "continued_with_horizon_extension": not same_training_config,
+        "parent_run_name": run_manifest.get("run_name"),
+        "parent_training_configuration_hash": run_manifest.get("training_configuration_hash"),
+    }
 
 
 def _load_metrics(path: Path) -> list[dict[str, Any]]:

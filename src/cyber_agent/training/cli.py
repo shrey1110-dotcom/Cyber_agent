@@ -37,6 +37,11 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--max-steps", type=int)
     train.add_argument("--evaluation-max-batches", type=int)
     train.add_argument("--resume", type=Path)
+    train.add_argument(
+        "--allow-horizon-extension",
+        action="store_true",
+        help="allow a new run to resume only an otherwise identical checkpoint with a higher max_steps value",
+    )
     train.add_argument("--allow-pilot-artifacts", action="store_true")
     train.add_argument("--confirm-start", action="store_true")
 
@@ -98,12 +103,15 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     if args.command == "train":
         if not args.confirm_start:
             raise ValueError("training has not started; pass --confirm-start after reviewing the snapshot and tokenizer provenance")
+        if args.allow_horizon_extension and not args.resume:
+            raise ValueError("--allow-horizon-extension requires --resume and a new run name")
         artifacts = TrainingArtifacts.load(
             project_root=root, snapshot_name=args.snapshot, tokenizer_path=args.tokenizer, allow_pilot_artifacts=allow_pilot
         )
         run = PretrainingRun.create(
             config=config, artifacts=artifacts, run_name=args.run_name,
             resume_checkpoint=args.resume.resolve() if args.resume else None,
+            allow_horizon_extension=args.allow_horizon_extension,
         )
         if args.evaluation_max_batches is not None and args.evaluation_max_batches < 1:
             raise ValueError("--evaluation-max-batches must be positive")

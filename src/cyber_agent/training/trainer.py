@@ -57,6 +57,7 @@ class PretrainingRun:
         run_name: str,
         resume_checkpoint: Path | None = None,
         allow_finished_checkpoint: bool = False,
+        allow_horizon_extension: bool = False,
     ) -> "PretrainingRun":
         if not run_name or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for character in run_name):
             raise ValueError("run_name must use only letters, digits, dot, underscore, and hyphen")
@@ -95,6 +96,10 @@ class PretrainingRun:
         }
         if run_directory.exists() and resume_checkpoint is None:
             raise ValueError("run directory already exists; choose a new run name or resume from an immutable checkpoint")
+        if allow_horizon_extension and resume_checkpoint is None:
+            raise ValueError("training-horizon extension requires an explicit immutable resume checkpoint")
+        if allow_horizon_extension and run_directory.exists():
+            raise ValueError("training-horizon extension requires a new run name and empty run directory")
         run_directory.mkdir(parents=True, exist_ok=True)
         atomic_write_json(run_directory / "run_manifest.json", run_manifest)
         if run_manifest["run_status"] == "local_research_pilot":
@@ -104,21 +109,40 @@ class PretrainingRun:
             )
         run = cls(config, artifacts, run_name, model, optimizer, run_directory, run_manifest, [])
         if resume_checkpoint is not None:
-            run.resume(resume_checkpoint, allow_finished_checkpoint=allow_finished_checkpoint)
+            run.resume(
+                resume_checkpoint,
+                allow_finished_checkpoint=allow_finished_checkpoint,
+                allow_horizon_extension=allow_horizon_extension,
+            )
         return run
 
-    def resume(self, checkpoint: Path, *, allow_finished_checkpoint: bool = False) -> None:
+    def resume(
+        self,
+        checkpoint: Path,
+        *,
+        allow_finished_checkpoint: bool = False,
+        allow_horizon_extension: bool = False,
+    ) -> None:
         loaded = load_checkpoint(
             path=checkpoint,
             model=self.model,
             optimizer=self.optimizer,
             expected_run_manifest=self.run_manifest,
+            allow_horizon_extension=allow_horizon_extension,
         )
         self.step = int(loaded["step"])
         self.metrics = list(loaded["metrics"])
         if self.step >= self.config.max_steps and not allow_finished_checkpoint:
             raise ValueError("checkpoint has already reached configured max_steps")
         self.tokens_seen = sum(int(row.get("tokens_seen_increment", 0)) for row in self.metrics)
+        if loaded["continued_with_horizon_extension"]:
+            self.run_manifest["continuation"] = {
+                "kind": "safe_max_steps_extension",
+                "parent_checkpoint": str(checkpoint),
+                "parent_run_name": loaded["parent_run_name"],
+                "parent_training_configuration_hash": loaded["parent_training_configuration_hash"],
+            }
+            atomic_write_json(self.run_directory / "run_manifest.json", self.run_manifest)
 
     def _train_batches(self) -> Iterator[tuple[mx.array, mx.array]]:
         while True:

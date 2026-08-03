@@ -154,6 +154,28 @@ class TrainingConfig:
     def configuration_hash(self) -> str:
         return hashlib.sha256(_canonical_json(self.resolved_dict()).encode("utf-8")).hexdigest()
 
+    def is_safe_horizon_extension_of(self, previous: dict[str, Any]) -> bool:
+        """Allow only a strictly longer, otherwise identical training plan.
+
+        This enables a new, provenance-linked continuation run after a bounded
+        pilot reaches its configured endpoint.  It deliberately does not allow
+        data, model, optimizer, seed, or checkpoint-location changes.
+        """
+        current = self.resolved_dict()
+        if set(previous) != set(current) or "max_steps" not in previous:
+            return False
+        try:
+            previous_max_steps = int(previous["max_steps"])
+        except (TypeError, ValueError):
+            return False
+        if current["max_steps"] <= previous_max_steps:
+            return False
+        return all(
+            current[key] == previous[key]
+            for key in current
+            if key != "max_steps"
+        )
+
     def with_overrides(self, **changes: Any) -> "TrainingConfig":
         config = replace(self, **changes)
         config.validate()
