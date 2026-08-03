@@ -32,6 +32,11 @@ evaluates only held-out splits. The current checkpoint is a private,
 one-step research bootstrap—not a useful or releasable model. See
 [the training guide](docs/training.md).
 
+`cyber-agent-llm-v0` is a compiled local chat interface for inspecting that
+pilot checkpoint. It is intentionally disconnected from tools, Docker, and the
+network, and its un-instruction-tuned output may be low quality. See
+[the v0 chat guide](docs/chat_v0.md).
+
 For a continuation-oriented description of the current implementation, local
 generated state, file responsibilities, invariants, and remaining production
 work, read the [engineering handoff](docs/HANDOFF.md).
