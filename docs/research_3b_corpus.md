@@ -51,10 +51,11 @@ must add source-specific, independently reviewed technical sources, especially
 code and Q&A/documentation, then deduplicate **across the final mixture** before
 train/validation/test splits are made.
 
-The planned Stack Exchange route remains disabled: its source-specific adapter
-must preserve post/revision license version, canonical URL, author attribution,
-site identity, and per-record provenance before its exact archival release can
-be reviewed and enabled. Public accessibility is not approval.
+The Stack Exchange route is now enabled only in the isolated
+`research-3b-tech-v1` private pilot. Its source-specific adapter preserves
+post/revision license era, canonical URL, site identity, and per-record
+provenance. The archive is still not cleared for redistribution or public model
+weights. Public accessibility alone was not treated as approval.
 
 ## Commands
 
@@ -78,3 +79,12 @@ uv run python -m cyber_agent.data_pipeline.cli \
 After it completes, run the regular phase-2 gates and freeze a **new** snapshot.
 Do not run balancing/splitting or tokenizer training on this general tranche as
 if it were the final 3B-token mixture.
+
+The technical archive command is separate and capped:
+
+```bash
+uv run python -m cyber_agent.data_pipeline.cli \
+  --collection research-3b-tech-v1 acquire-research \
+  --target-tokens 1800000000 --seed 42 --confirm-download \
+  --source stack-overflow-posts-20240407-candidate
+```

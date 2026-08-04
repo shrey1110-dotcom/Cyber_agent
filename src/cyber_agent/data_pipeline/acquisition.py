@@ -51,7 +51,7 @@ class DownloadSpec:
             raise ValueError("approved downloads require an exact HTTPS URL")
         if parsed.username or parsed.password:
             raise ValueError("download URLs must not embed authentication credentials")
-        if parsed.hostname.casefold() not in {domain.casefold() for domain in self.allowed_domains}:
+        if not _domain_allowed(parsed.hostname, self.allowed_domains):
             raise ValueError("download URL domain is outside the approved domain allowlist")
         if self.maximum_bytes < 1 or self.retry_limit < 0 or self.timeout_seconds <= 0:
             raise ValueError("download limits, timeout, and retries must be valid")
@@ -97,13 +97,26 @@ def sha1_path(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _domain_allowed(hostname: str, allowed_domains: tuple[str, ...] | list[str] | set[str]) -> bool:
+    host = hostname.casefold().rstrip(".")
+    for configured in allowed_domains:
+        domain = configured.casefold().rstrip(".")
+        if domain.startswith("*."):
+            suffix = domain[2:]
+            if host.endswith("." + suffix) and host != suffix:
+                return True
+        elif host == domain:
+            return True
+    return False
+
+
 class _ApprovedRedirectHandler(urllib.request.HTTPRedirectHandler):
     def __init__(self, allowed_domains: tuple[str, ...]) -> None:
-        self.allowed_domains = {domain.casefold() for domain in allowed_domains}
+        self.allowed_domains = allowed_domains
 
     def redirect_request(self, req: urllib.request.Request, fp: BinaryIO, code: int, msg: str, headers: Any, newurl: str):
         parsed = urllib.parse.urlparse(newurl)
-        if parsed.scheme != "https" or not parsed.hostname or parsed.hostname.casefold() not in self.allowed_domains:
+        if parsed.scheme != "https" or not parsed.hostname or not _domain_allowed(parsed.hostname, self.allowed_domains):
             raise ValueError("redirect target is outside the approved HTTPS domain allowlist")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
@@ -139,7 +152,7 @@ def download_file(
             response = request_opener(request, timeout=spec.timeout_seconds)
             final_url = getattr(response, "geturl", lambda: spec.url)()
             final_host = urllib.parse.urlparse(final_url).hostname
-            if not final_host or final_host.casefold() not in {domain.casefold() for domain in spec.allowed_domains}:
+            if not final_host or not _domain_allowed(final_host, spec.allowed_domains):
                 raise ValueError("response URL is outside the approved domain allowlist")
             status = int(getattr(response, "status", 200))
             append = current_size > 0 and status == 206

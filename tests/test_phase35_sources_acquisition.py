@@ -122,6 +122,32 @@ def test_download_budget_redirect_resume_and_atomicity(tmp_path: Path) -> None:
     assert preserved.read_bytes() == b"previous"
 
 
+def test_redirect_allowlist_supports_an_explicit_archive_subdomain_family_only(tmp_path: Path) -> None:
+    body = b"archive bytes"
+    spec = DownloadSpec(
+        source_name="fixture",
+        exact_release_or_version="v1",
+        url="https://archive.org/pilot.bin",
+        allowed_domains=("archive.org", "*.archive.org"),
+        maximum_bytes=1024,
+        retry_limit=0,
+        rate_limit_bytes_per_second=0,
+    )
+    destination = tmp_path / "archive.bin"
+    result = download_file(
+        spec,
+        destination,
+        opener=lambda request, timeout: FakeResponse(body, final_url="https://dn720201.ca.archive.org/pilot.bin"),
+    )
+    assert result["bytes"] == len(body)
+    with pytest.raises(ValueError, match="outside"):
+        download_file(
+            spec,
+            tmp_path / "evil.bin",
+            opener=lambda request, timeout: FakeResponse(body, final_url="https://archive.org.attacker/pilot.bin"),
+        )
+
+
 def test_download_can_verify_a_published_legacy_sha1_without_using_it_as_identity(tmp_path: Path) -> None:
     url = "https://approved.example/pilot.bin"
     body = b"pinned upstream release"

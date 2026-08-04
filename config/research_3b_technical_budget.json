@@ -1,0 +1,36 @@
+{
+  "maximum_download_bytes": 25000000000,
+  "maximum_raw_documents": 18000000,
+  "maximum_clean_documents": 16000000,
+  "maximum_estimated_tokens": 1800000000,
+  "maximum_documents_per_source": 18000000,
+  "maximum_tokens_per_source": 1800000000,
+  "maximum_archive_files": 10,
+  "maximum_decompressed_bytes": 120000000000,
+  "request_timeout_seconds": 60,
+  "maximum_retries": 3,
+  "maximum_tokens_per_category": {
+    "general": 1800000000,
+    "code": 1800000000,
+    "linux": 1800000000,
+    "networking": 1800000000,
+    "cybersecurity": 1800000000,
+    "terminal": 1800000000
+  },
+  "minimum_tokens_per_category": {
+    "general": 0,
+    "code": 0,
+    "linux": 0,
+    "networking": 0,
+    "cybersecurity": 0,
+    "terminal": 0
+  },
+  "category_targets": {
+    "general": 0.1,
+    "code": 0.45,
+    "linux": 0.15,
+    "networking": 0.15,
+    "cybersecurity": 0.1,
+    "terminal": 0.05
+  }
+}
