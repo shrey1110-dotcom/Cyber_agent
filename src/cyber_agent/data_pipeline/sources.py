@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -247,7 +247,57 @@ class SourceRegistry:
                 if not isinstance(local_payload, dict) or not isinstance(local_payload.get("sources"), list):
                     raise ValueError("local_research_sources.json must contain a sources array")
                 definitions.extend(SourceDefinition.from_dict(item) for item in local_payload["sources"])
+        # A named collection may explicitly select exact releases from the
+        # global review registry.  This does not copy, infer, or broaden a
+        # review: every selection must repeat the reviewed release and URL,
+        # and its materialized output is isolated under that collection.
+        selection_path = paths.collection_source_config
+        if selection_path is not None and selection_path.exists():
+            definitions = cls._selected_collection_sources(definitions, paths, selection_path)
         return cls(definitions, paths)
+
+    @staticmethod
+    def _selected_collection_sources(
+        definitions: list[SourceDefinition],
+        paths: PipelinePaths,
+        selection_path: Path,
+    ) -> list[SourceDefinition]:
+        try:
+            payload = json.loads(selection_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"cannot load collection source selection {selection_path}: {exc}") from exc
+        if not isinstance(payload, dict) or payload.get("collection") != paths.collection:
+            raise ValueError("collection source selection must declare the active collection name")
+        selected = payload.get("sources")
+        if not isinstance(selected, list) or not selected:
+            raise ValueError("collection source selection must contain a non-empty sources array")
+        known = {source.source_name: source for source in definitions}
+        output: list[SourceDefinition] = []
+        seen: set[str] = set()
+        for entry in selected:
+            if not isinstance(entry, dict):
+                raise ValueError("collection source selections must be objects")
+            source_name = entry.get("source_name")
+            release = entry.get("exact_release_or_version")
+            location = entry.get("download_location")
+            if not all(isinstance(value, str) and value for value in (source_name, release, location)):
+                raise ValueError("collection source selection requires source_name, exact_release_or_version, and download_location")
+            if source_name in seen:
+                raise ValueError(f"collection source selection repeats source: {source_name}")
+            seen.add(source_name)
+            source = known.get(source_name)
+            if source is None:
+                raise ValueError(f"collection source is not present in the reviewed registry: {source_name}")
+            if source.exact_release_or_version != release or source.download_location != location:
+                raise ValueError(f"collection source release or download URL does not match review record: {source_name}")
+            output.append(
+                replace(
+                    source,
+                    collection=paths.collection or "",
+                    data_location=(paths.sources / source.source_name / "manifest.jsonl").relative_to(paths.project_root).as_posix(),
+                )
+            )
+        return output
 
     def validate(self, license_policy: LicensePolicy) -> list[str]:
         return [error for source in self._sources.values() for error in source.validate(license_policy)]

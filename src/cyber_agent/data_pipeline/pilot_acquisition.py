@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
+import socket
 import urllib.parse
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator, ParamSpec, TypeVar
 
 from cyber_agent.data_pipeline.acquisition import (
     DownloadSpec,
@@ -24,6 +29,54 @@ from cyber_agent.data_pipeline.materialize import (
 )
 from cyber_agent.data_pipeline.sources import SourceDefinition, SourceRegistry
 from cyber_agent.data_pipeline.synthetic import EXAMPLE_KINDS, SAFE_TOOLS, generate_safe_tool_examples
+
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+@contextmanager
+def acquisition_lock(config: PipelineConfig) -> Iterator[None]:
+    """Prevent concurrent acquisition writers for one collection.
+
+    The lock is deliberately not treated as stale automatically.  A stale
+    lock is evidence of an interrupted acquisition and must be inspected or
+    explicitly recovered, rather than risking two writers publishing the same
+    source directory.
+    """
+    lock = config.paths.manifests / ".acquisition.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as exc:
+        try:
+            owner = lock.read_text(encoding="utf-8").strip()
+        except OSError:
+            owner = "unreadable lock metadata"
+        raise ValueError(f"acquisition is already active or needs recovery: {owner}") from exc
+    try:
+        payload = {
+            "pid": os.getpid(),
+            "hostname": socket.gethostname(),
+            "collection": config.paths.collection or "default",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def single_acquisition_writer(function: Callable[P, R]) -> Callable[P, R]:
+    @wraps(function)
+    def wrapped(config: PipelineConfig, *args: P.args, **kwargs: P.kwargs) -> R:
+        with acquisition_lock(config):
+            return function(config, *args, **kwargs)
+    return wrapped
 
 
 def _download_destination(config: PipelineConfig, source: SourceDefinition, registry: SourceRegistry) -> Path:
@@ -76,6 +129,7 @@ def _materialize_download(
     raise ValueError(f"unsupported pilot materialization adapter: {source.adapter}")
 
 
+@single_acquisition_writer
 def acquire_pilot(
     config: PipelineConfig,
     *,

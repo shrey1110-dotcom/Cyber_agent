@@ -129,6 +129,19 @@ class PipelinePaths:
     def configuration(self) -> Path:
         return self.project_root / "config"
 
+    @property
+    def collection_source_config(self) -> Path | None:
+        """Optional immutable source-selection record for a named collection.
+
+        A collection can reference an already reviewed, pinned source release
+        without silently changing the release review itself.  The selection is
+        separate from the global review registry so a frozen collection records
+        exactly which releases it was allowed to consume.
+        """
+        if self.collection is None:
+            return None
+        return self.configuration / "collections" / f"{self.collection}.json"
+
     def ensure_directories(self) -> None:
         for path in (
             self.raw,

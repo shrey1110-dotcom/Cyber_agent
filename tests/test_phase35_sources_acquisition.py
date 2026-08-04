@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from cyber_agent.data_pipeline.acquisition import DownloadSpec, ExtractionLimits, download_file, safe_extract_archive
-from cyber_agent.data_pipeline.pilot_acquisition import _download_destination
+from cyber_agent.data_pipeline.pilot_acquisition import _download_destination, acquisition_lock
 from cyber_agent.data_pipeline.config import PipelineConfig
 from cyber_agent.data_pipeline.export import read_jsonl
 from cyber_agent.data_pipeline.ingest import run_ingest
@@ -181,3 +181,12 @@ def test_same_release_archive_reuse_requires_exact_url_and_version(pipeline_proj
     )
     with pytest.raises(ValueError, match="same exact download URL and pinned release"):
         _download_destination(config, changed_release, guarded_registry)
+
+
+def test_acquisition_lock_fails_closed_for_an_overlapping_writer(pipeline_project: Path) -> None:
+    config = PipelineConfig.load(pipeline_project)
+    with acquisition_lock(config):
+        with pytest.raises(ValueError, match="already active or needs recovery"):
+            with acquisition_lock(config):
+                pass
+    assert not (config.paths.manifests / ".acquisition.lock").exists()
