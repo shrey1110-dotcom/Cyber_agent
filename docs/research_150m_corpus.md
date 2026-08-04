@@ -49,6 +49,41 @@ failure. The snapshot's checksum-verified content hash is
 It is entirely `general` / `CC-BY-SA-4.0`; it must not be treated as the
 balanced final cyber-model corpus or used to justify a production model.
 
+## Observed local run: `research-technical-v1`
+
+The isolated `research-150m-v2` collection is a technical complement to
+`research-150m-v1`, not a second copy of its general Wikimedia corpus. Its
+selection record is `config/collections/research-150m-v2.json`; each entry
+must repeat the exact reviewed source name, release, and download URL before
+the registry can materialize it under the new collection path.
+
+The completed local acquisition selected 22 reviewed sources plus the local
+safe-tool fixture, yielding 29,366 source records and 51,875,204 provisional
+source tokens before the Phase 2 gates. The safe gates retained 17,112
+documents / 14,150,466 provisional tokens in the immutable
+`research-technical-v1` snapshot:
+
+- 16,765 train, 175 validation, and 172 test documents;
+- 6,092 safe rejections, principally quality/repetition or sensitive-data
+  detections; and
+- 4,434 exact and 1,728 verified near-duplicate removals.
+
+The checksum-verified snapshot content hash is
+`91b42d1410aa724152ff32e546bb5a38d5f75e011eacf748b73be4f8402bb8b4`. It is
+predominantly code (12,484,248 provisional tokens) and is highly concentrated
+in Kubernetes code (52.84% of retained provisional tokens). It deliberately
+does not meet the standalone 10M-token general-category minimum. Any later
+tokenizer or pretraining run must treat `research-150m-v1` (90M general) and
+`research-technical-v1` (14.15M technical) as two independently verified,
+explicitly weighted inputs; it must not claim that their approximately 104M
+combined provisional tokens are a final balanced corpus for a 150M-parameter
+model.
+
+Collection acquisition now uses a fail-closed `.acquisition.lock`. A second
+writer for the same collection is rejected; stale locks are not silently
+discarded because they require inspection/recovery before another acquisition
+can publish output.
+
 The large run also exercises the bounded-memory implementation: JSONL ingest
 and clean stages stream records into temporary directories before atomic
 publication; exact deduplication remains exhaustive; and large-corpus

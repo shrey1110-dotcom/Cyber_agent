@@ -66,6 +66,27 @@ and do not train the next model from this general-only snapshot alone. It needs
 reviewed code, Linux, networking, cybersecurity, and terminal sources in a new
 versioned collection/snapshot first.
 
+The separate `research-150m-v2` technical complement is now also complete and
+frozen as `research-technical-v1`. It was sourced only from exact reviewed
+permissively licensed releases already in the local source registry, plus the
+project-authored safe-tool fixture. Its 29,366 materialized source records
+contained 51,875,204 provisional tokens before gates; 17,112 documents /
+14,150,466 provisional tokens remain after sensitive-data filtering, quality
+filtering, exact/near deduplication, and deterministic splitting (16,765 /
+175 / 172). Its verified snapshot hash is
+`91b42d1410aa724152ff32e546bb5a38d5f75e011eacf748b73be4f8402bb8b4`.
+
+This is explicitly a code-heavy complement, not a replacement for v1 or a
+balanced 150M-model corpus: 12.48M retained provisional tokens are code and
+Kubernetes supplies 52.84% of the total. The combined frozen inventory is
+about 104M provisional tokens (v1 general + technical complement), still far
+below a final high-quality pretraining budget. Do not concatenate them
+implicitly: a later mixture manifest must pin both snapshot hashes and record
+explicit sampling weights. Named collection source selections live under
+`config/collections/` and must repeat the reviewed source's exact name,
+release, and URL. Collection acquisition is also guarded by a fail-closed
+`.acquisition.lock` so concurrent writers cannot race.
+
 ## Verified state at handoff
 
 The complete test suite passed after the latest acquisition/extraction changes:
