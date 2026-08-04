@@ -49,6 +49,24 @@ failure. The snapshot's checksum-verified content hash is
 It is entirely `general` / `CC-BY-SA-4.0`; it must not be treated as the
 balanced final cyber-model corpus or used to justify a production model.
 
+## Observed local run: `research-general-v2`
+
+The 90M v1 limit excluded 95,620 already deduplicated records solely because
+of the old `general` category cap. Raising that reviewed cap to 135M did not
+download, ingest, or clean any new source. It deterministically rebalanced the
+same 306,116 deduplicated, attributed records into the immutable
+`research-general-v2` snapshot:
+
+- 131,314,235 provisional tokens, all `general` / `CC-BY-SA-4.0`;
+- 300,028 train, 3,059 validation, and 3,029 test documents; and
+- the verified content hash
+  `db46bbbf132190ca9ec231587318fe04ff7887f16b864ff33d2b3d00e86ef5c1`.
+
+`research-150m-v1` remains immutable and valid historical evidence. New
+experiments needing the larger general slice must pin `research-general-v2`
+instead. It is still private local-research-only and is not by itself a
+balanced cyber-model corpus.
+
 ## Observed local run: `research-technical-v1`
 
 The isolated `research-150m-v2` collection is a technical complement to
@@ -73,9 +91,9 @@ The checksum-verified snapshot content hash is
 predominantly code (12,484,248 provisional tokens) and is highly concentrated
 in Kubernetes code (52.84% of retained provisional tokens). It deliberately
 does not meet the standalone 10M-token general-category minimum. Any later
-tokenizer or pretraining run must treat `research-150m-v1` (90M general) and
+tokenizer or pretraining run must treat `research-general-v2` (131.31M general) and
 `research-technical-v1` (14.15M technical) as two independently verified,
-explicitly weighted inputs; it must not claim that their approximately 104M
+explicitly weighted inputs; it must not claim that their approximately 145M
 combined provisional tokens are a final balanced corpus for a 150M-parameter
 model.
 

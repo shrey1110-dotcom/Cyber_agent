@@ -51,10 +51,10 @@ own paths, budgets, source binding, and snapshots so it cannot overwrite
 Wikipedia, English Wikibooks, and English Wikiversity XML/bzip2 dumps under
 recorded CC-BY-SA-4.0 terms. The adapter streams only non-redirect
 main-namespace pages, retains article-level attribution, rejects DTD/entity
-input, limits decompression, and never executes downloaded content. It is an
-unfrozen private-research collection; do not point tokenizer or pretraining
-commands at it until acquisition, the full Phase 2 pipeline, inspection, and a
-new immutable snapshot have completed.
+input, limits decompression, and never executes downloaded content. Its first
+two snapshots are now frozen, but they remain private research artifacts; do
+not point tokenizer or pretraining commands at them until an explicit,
+provenance-pinned mixture manifest and tokenizer candidate evaluation exist.
 
 That initial collection has now completed its own pipeline and frozen snapshot
 as `research-150m-v1`: 210,496 retained all-general CC-BY-SA-4.0 documents,
@@ -65,6 +65,16 @@ Do not confuse its source-acquisition 150M target with final retained tokens,
 and do not train the next model from this general-only snapshot alone. It needs
 reviewed code, Linux, networking, cybersecurity, and terminal sources in a new
 versioned collection/snapshot first.
+
+The larger `research-general-v2` snapshot then reused the already cleaned,
+deduplicated v1 collection after its general-category cap was raised from 90M
+to 135M. It added no new download or source. It has 306,116 all-general
+CC-BY-SA-4.0 records / 131,314,235 provisional tokens, a deterministic
+300,028 / 3,059 / 3,029 split, and verified hash
+`db46bbbf132190ca9ec231587318fe04ff7887f16b864ff33d2b3d00e86ef5c1`.
+Use this snapshot rather than the 90M `research-150m-v1` snapshot when a later
+explicit mixture needs the larger general slice. Both remain immutable,
+private-local-research-only, and unsuitable for standalone production claims.
 
 The separate `research-150m-v2` technical complement is now also complete and
 frozen as `research-technical-v1`. It was sourced only from exact reviewed
@@ -79,7 +89,7 @@ filtering, exact/near deduplication, and deterministic splitting (16,765 /
 This is explicitly a code-heavy complement, not a replacement for v1 or a
 balanced 150M-model corpus: 12.48M retained provisional tokens are code and
 Kubernetes supplies 52.84% of the total. The combined frozen inventory is
-about 104M provisional tokens (v1 general + technical complement), still far
+145,464,701 provisional tokens (`research-general-v2` + technical complement), still far
 below a final high-quality pretraining budget. Do not concatenate them
 implicitly: a later mixture manifest must pin both snapshot hashes and record
 explicit sampling weights. Named collection source selections live under
@@ -89,10 +99,10 @@ release, and URL. Collection acquisition is also guarded by a fail-closed
 
 ## Verified state at handoff
 
-The complete test suite passed after the latest acquisition/extraction changes:
+The complete test suite passed after the latest collection-isolation changes:
 
 ```text
-115 passed in 0.88s
+119 passed in 0.86s
 ```
 
 The prior 86 Phase 1–3 tests are included in that run and still pass. The
@@ -147,8 +157,10 @@ The observed frozen snapshots are:
 | `cyber-pilot-v5` | 917 accepted, 381 rejected | 1,121,828 | 907 / 3 / 7 | `pilot_only` |
 | `cyber-pilot-v6` | 2,671 accepted | 3,050,000 | local research snapshot | `pilot_only` |
 | `cyber-pilot-v7` | 4,679 accepted | 4,081,394 | 4,586 / 49 / 44 | `pilot_only` |
+| `research-general-v2` | 306,116 accepted | 131,314,235 | 300,028 / 3,059 / 3,029 | `pilot_only` |
+| `research-technical-v1` | 17,112 accepted | 14,150,466 | 16,765 / 175 / 172 | `pilot_only` |
 
-Both snapshots are local-research-only, release-cleared is false, dataset
+All snapshots are local-research-only, release-cleared is false, dataset
 redistribution is false, and model-weight publication is false. They are
 immutable: the same name/version cannot be frozen twice, and checksum changes
 make verification fail. Their embedded provenance records refer to the Git
@@ -477,6 +489,8 @@ without guessing.
 | `config/dataset_mode.json` | `local_research_only` mode and publication/redistribution false flags. |
 | `config/pilot_budget.json` | Download, document, estimated-token, source, category, archive, timeout, retry, and target limits. |
 | `config/data_pipeline.json` | Phase 2 cleaning, quality, deduplication, split, and seed configuration. |
+| `config/research_budget.json` | Separate named-collection budget; the general cap is 135M for the expanded general snapshot. |
+| `config/collections/research-150m-v2.json` | Exact reviewed technical source-selection record for the isolated v2 collection. |
 | `config/tokenizer.json` | Byte-level BPE settings, 16K/24K/32K candidates, 24K default, special tokens, and train path. |
 | `config/training_instruction_v0.json` | Bounded v0.4 local instruction-pilot hyperparameters; uses batch size one and a lower learning rate, and remains research-only. |
 | `fixtures/sample_corpus/` | Tiny accepted/rejected Phase 2 fixture corpus, manifest, and CC0 fixture license. |
