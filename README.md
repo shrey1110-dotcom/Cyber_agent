@@ -68,6 +68,12 @@ It is private research only and cannot overwrite the pilot corpus. See [the
 research-150m corpus guide](docs/research_150m_corpus.md) for its hard budgets,
 commands, sources, and still-unresolved licensing/coverage work.
 
+The next stage is an isolated general-English tranche toward a future 3B-token
+local-research mixture. It has a version-pinned release, publisher checksum,
+its own reviewed budget profile, resumable acquisition, and no permission to
+start final 150M-model training by itself. See [the 3B corpus
+plan](docs/research_3b_corpus.md).
+
 The implemented flow is:
 
 ```text

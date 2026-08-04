@@ -183,3 +183,8 @@ entry, per-record provenance sufficient for its source type, a hard source cap,
 and a new collection/snapshot version. Do not enable Common Pile, FineWeb,
 Dolma, The Stack, random GitHub repositories, or general web crawling without
 that work.
+
+The next bounded expansion is documented in
+[`research_3b_corpus.md`](research_3b_corpus.md). It is intentionally isolated
+from both historical 150M snapshots and remains only the general-English
+tranche of the eventual balanced mixture.

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "collection": "research-3b-general-v1",
+  "budget_profile": "research_3b_general_budget.json",
+  "purpose": "First general-English tranche toward a future 3B-token local-research mixture. It is not a complete, balanced corpus and cannot itself unlock 150M-model training. The exact release, legacy publisher checksum, CC-BY-SA provenance, and private-local-research-only restriction are pinned here and in the global review record.",
+  "sources": [
+    {
+      "source_name": "enwiki-20260701-general-tranche",
+      "exact_release_or_version": "20260701-pages-articles-multistream",
+      "download_location": "https://dumps.wikimedia.org/enwiki/20260701/enwiki-20260701-pages-articles-multistream.xml.bz2"
+    }
+  ]
+}

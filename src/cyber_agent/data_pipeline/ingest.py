@@ -203,10 +203,21 @@ def _load_entry(
     if not isinstance(metadata, dict):
         raise ValueError("metadata must be an object")
     if category == "code":
-        for field_name in ("repository", "revision"):
-            value = metadata.get(field_name)
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"code record is missing per-record {field_name} metadata")
+        provenance_kind = metadata.get("code_provenance_kind", "repository")
+        if provenance_kind == "repository":
+            for field_name in ("repository", "revision"):
+                value = metadata.get(field_name)
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(f"code record is missing per-record {field_name} metadata")
+        elif provenance_kind == "stackexchange_post":
+            for field_name in ("stackexchange_site", "post_id", "post_creation_date", "license_period"):
+                value = metadata.get(field_name)
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(f"Stack Exchange code record is missing per-record {field_name} metadata")
+            if source_url != f"{metadata['stackexchange_site']}/questions/{metadata['post_id']}" and source_url != f"{metadata['stackexchange_site']}/a/{metadata['post_id']}":
+                raise ValueError("Stack Exchange code record has an invalid canonical post URL")
+        else:
+            raise ValueError("code record has an unsupported provenance kind")
         declared = metadata.get("detected_licenses", [license_identifier])
         if not isinstance(declared, list) or not declared or any(not isinstance(item, str) for item in declared):
             raise ValueError("code record has ambiguous per-record license metadata")

@@ -39,6 +39,7 @@ class SourceDefinition:
     enabled: bool
     notes: str = ""
     published_sha256: str = ""
+    published_sha1: str = ""
     approved_domains: tuple[str, ...] = ()
     retrieved_at: str = ""
     local_research_source: bool = False
@@ -115,6 +116,7 @@ class SourceDefinition:
             **converted,
             notes=value.get("notes", ""),
             published_sha256=value.get("published_sha256", ""),
+            published_sha1=value.get("published_sha1", ""),
             approved_domains=tuple(approved_domains),
             retrieved_at=value.get("retrieved_at", value.get("reviewed_at", "")),
             local_research_source=local_research_source,
@@ -163,6 +165,10 @@ class SourceDefinition:
             digest = self.published_sha256.casefold()
             if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
                 errors.append(f"{self.source_name}: published_sha256 is not a full SHA-256 digest")
+        if self.published_sha1:
+            digest = self.published_sha1.casefold()
+            if len(digest) != 40 or any(character not in "0123456789abcdef" for character in digest):
+                errors.append(f"{self.source_name}: published_sha1 is not a full SHA-1 digest")
         rule = license_policy.rule_for(self.license)
         if rule is None:
             errors.append(f"{self.source_name}: license is absent from policy: {self.license}")
@@ -317,6 +323,7 @@ class SourceRegistry:
         if source.adapter not in {
             "local_manifest", "synthetic_tool_examples", "http_archive_text",
             "http_stix_json", "http_cwe_xml", "http_wikimedia_xml_bz2",
+            "http_stackexchange_posts_7z",
         }:
             raise ValueError(f"source adapter is not an ingestible local manifest: {source.adapter}")
         return source
@@ -333,7 +340,7 @@ class SourceRegistry:
         self._require_collection(source)
         if source.adapter not in {
             "http_file", "http_archive", "http_archive_text", "http_stix_json",
-            "http_cwe_xml", "http_wikimedia_xml_bz2",
+            "http_cwe_xml", "http_wikimedia_xml_bz2", "http_stackexchange_posts_7z",
         }:
             raise ValueError(f"source has no remote download adapter: {source_name}")
         return source

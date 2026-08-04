@@ -9,8 +9,16 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import py7zr
 
-from cyber_agent.data_pipeline.acquisition import DownloadSpec, ExtractionLimits, download_file, safe_extract_archive
+from cyber_agent.data_pipeline.acquisition import (
+    DownloadSpec,
+    ExtractionLimits,
+    download_file,
+    safe_extract_7z_member,
+    safe_extract_archive,
+    sha1_path,
+)
 from cyber_agent.data_pipeline.pilot_acquisition import _download_destination, acquisition_lock
 from cyber_agent.data_pipeline.config import PipelineConfig
 from cyber_agent.data_pipeline.export import read_jsonl
@@ -114,6 +122,31 @@ def test_download_budget_redirect_resume_and_atomicity(tmp_path: Path) -> None:
     assert preserved.read_bytes() == b"previous"
 
 
+def test_download_can_verify_a_published_legacy_sha1_without_using_it_as_identity(tmp_path: Path) -> None:
+    url = "https://approved.example/pilot.bin"
+    body = b"pinned upstream release"
+    destination = tmp_path / "pilot.bin"
+    spec = DownloadSpec(
+        source_name="fixture",
+        exact_release_or_version="v1",
+        url=url,
+        allowed_domains=("approved.example",),
+        maximum_bytes=1024,
+        expected_sha1=hashlib.sha1(body).hexdigest(),
+        retry_limit=0,
+        rate_limit_bytes_per_second=0,
+    )
+
+    result = download_file(
+        spec,
+        destination,
+        opener=lambda request, timeout: FakeResponse(body, final_url=url),
+    )
+
+    assert result["published_sha1"] == hashlib.sha1(body).hexdigest()
+    assert sha1_path(destination) == hashlib.sha1(body).hexdigest()
+
+
 def test_safe_archive_blocks_traversal_and_decompression_limits(tmp_path: Path) -> None:
     bad = tmp_path / "bad.zip"
     with zipfile.ZipFile(bad, "w") as archive:
@@ -161,6 +194,40 @@ def test_safe_archive_skips_links_without_following_them(tmp_path: Path) -> None
     assert (tmp_path / "link-output" / "source" / "main.go").read_bytes() == payload
     assert not (tmp_path / "link-output" / "source" / "escape").exists()
     assert not (tmp_path / "outside").exists()
+
+
+def test_safe_7z_extractor_allows_one_declared_member_and_enforces_size(tmp_path: Path) -> None:
+    archive = tmp_path / "posts.7z"
+    payload = b"<posts><row Id='1' Body='hello'/></posts>"
+    with py7zr.SevenZipFile(archive, mode="w") as bundle:
+        bundle.writestr(payload, "stackoverflow.com-Posts/Posts.xml")
+        bundle.writestr(b"ignore", "stackoverflow.com-Posts/Users.xml")
+
+    output = tmp_path / "extracted" / "Posts.xml"
+    report = safe_extract_7z_member(
+        archive,
+        output,
+        member_name="stackoverflow.com-Posts/Posts.xml",
+        maximum_uncompressed_bytes=1000,
+    )
+
+    assert report["uncompressed_bytes"] == len(payload)
+    assert output.read_bytes() == payload
+    assert not (tmp_path / "extracted" / "Users.xml").exists()
+    with pytest.raises(ValueError, match="already exists"):
+        safe_extract_7z_member(
+            archive,
+            output,
+            member_name="stackoverflow.com-Posts/Posts.xml",
+            maximum_uncompressed_bytes=1000,
+        )
+    with pytest.raises(ValueError, match="decompressed-byte limit"):
+        safe_extract_7z_member(
+            archive,
+            tmp_path / "too-small.xml",
+            member_name="stackoverflow.com-Posts/Posts.xml",
+            maximum_uncompressed_bytes=10,
+        )
 
 
 def test_same_release_archive_reuse_requires_exact_url_and_version(pipeline_project: Path) -> None:

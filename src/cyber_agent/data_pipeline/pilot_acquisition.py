@@ -16,6 +16,7 @@ from cyber_agent.data_pipeline.acquisition import (
     DownloadSpec,
     ExtractionLimits,
     download_file,
+    safe_extract_7z_member,
     safe_extract_archive,
 )
 from cyber_agent.data_pipeline.config import PipelineConfig
@@ -24,6 +25,7 @@ from cyber_agent.data_pipeline.export import atomic_write_json, read_jsonl
 from cyber_agent.data_pipeline.materialize import (
     materialize_archive,
     materialize_cwe,
+    materialize_stackexchange_posts,
     materialize_stix,
     materialize_wikimedia_xml_bz2,
 )
@@ -108,6 +110,19 @@ def _materialize_download(
         return materialize_stix(config, source, downloaded, token_limit=token_limit)
     if source.adapter == "http_wikimedia_xml_bz2":
         return materialize_wikimedia_xml_bz2(config, source, downloaded, token_limit=token_limit)
+    if source.adapter == "http_stackexchange_posts_7z":
+        member_name = (source.adapter_options or {}).get("posts_member_name")
+        if not isinstance(member_name, str) or not member_name:
+            raise ValueError("Stack Exchange source requires a declared posts_member_name")
+        extracted = downloaded.parent / "extracted" / "Posts.xml"
+        if not extracted.exists():
+            safe_extract_7z_member(
+                downloaded,
+                extracted,
+                member_name=member_name,
+                maximum_uncompressed_bytes=config.pilot_budget.maximum_decompressed_bytes,
+            )
+        return materialize_stackexchange_posts(config, source, extracted, token_limit=token_limit)
     extraction = downloaded.parent / "extracted"
     if not extraction.exists():
         safe_extract_archive(
@@ -207,6 +222,7 @@ def acquire_pilot(
             allowed_domains=source.approved_domains or (parsed.hostname or "",),
             maximum_bytes=min(remaining_download, source.maximum_download_bytes or remaining_download),
             expected_sha256=source.published_sha256 or None,
+            expected_sha1=source.published_sha1 or None,
             timeout_seconds=config.pilot_budget.request_timeout_seconds,
             retry_limit=config.pilot_budget.maximum_retries,
         )

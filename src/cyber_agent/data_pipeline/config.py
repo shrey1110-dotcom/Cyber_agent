@@ -343,7 +343,26 @@ class PipelineConfig:
             return self
         scoped_paths = PipelinePaths(self.paths.project_root, collection)
         scoped_paths.ensure_directories()
-        return replace(self, paths=scoped_paths, pilot_budget=self.research_budget)
+        # A named collection can opt into a separately reviewed budget profile.
+        # The selection record is deliberately the only place that can choose a
+        # profile, and only a simple filename within config/ is accepted.  This
+        # prevents a command-line collection name from turning into arbitrary
+        # configuration-file access.
+        budget = self.research_budget
+        selection_path = scoped_paths.collection_source_config
+        if selection_path is not None and selection_path.exists():
+            selection = _load_json(selection_path)
+            budget_filename = selection.get("budget_profile")
+            if budget_filename is not None:
+                if (
+                    not isinstance(budget_filename, str)
+                    or not budget_filename.endswith(".json")
+                    or Path(budget_filename).name != budget_filename
+                    or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for character in budget_filename)
+                ):
+                    raise ValueError("collection budget_profile must be a simple JSON filename")
+                budget = PilotBudget.from_dict(_load_json(scoped_paths.configuration / budget_filename))
+        return replace(self, paths=scoped_paths, pilot_budget=budget)
 
     def fingerprint_payload(self) -> dict[str, Any]:
         return {
