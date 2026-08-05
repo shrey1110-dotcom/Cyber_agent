@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+import sqlite3
+import tempfile
 from collections import defaultdict
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from cyber_agent.data_pipeline.config import PipelineConfig
 from cyber_agent.data_pipeline.export import (
     atomic_write_jsonl,
     fingerprint,
+    iter_jsonl,
     read_jsonl,
     stage_is_current,
     write_stage_marker,
 )
-from cyber_agent.data_pipeline.schemas import Document, DuplicateRecord
+from cyber_agent.data_pipeline.schemas import Document, DuplicateRecord, canonical_json
 
 
 def token_shingles(text: str, width: int = 3) -> set[str]:
@@ -241,6 +246,8 @@ def run_deduplicate(config: PipelineConfig, *, force: bool = False) -> dict[str,
     outputs = [output_path, report_path]
     if not force and stage_is_current(config.paths.manifests, "deduplicate", input_fingerprint, outputs):
         return {"stage": "deduplicate", "status": "skipped", "outputs": [str(path) for path in outputs]}
+    if input_path.stat().st_size > 2 * 1024 * 1024 * 1024:
+        return _run_streaming_deduplicate(config, input_path, output_path, report_path, input_fingerprint)
     documents = [Document.from_dict(value) for value in read_jsonl(input_path)]
     retained, duplicates = deduplicate_documents(
         documents,
@@ -253,3 +260,104 @@ def run_deduplicate(config: PipelineConfig, *, force: bool = False) -> dict[str,
     counts = {"input": len(documents), "retained": len(retained), "removed": len(duplicates), "exact": exact, "near": near}
     write_stage_marker(config.paths.manifests, "deduplicate", input_fingerprint, outputs, counts)
     return {"stage": "deduplicate", "status": "complete", **counts, "outputs": [str(path) for path in outputs]}
+
+
+def _run_streaming_deduplicate(
+    config: PipelineConfig,
+    input_path,
+    output_path,
+    report_path,
+    input_fingerprint: str,
+) -> dict[str, Any]:
+    """Deduplicate multi-gigabyte collections without loading them into RAM.
+
+    Exact hashes and a bounded SimHash representative index live in SQLite.
+    The output and duplicate report are published atomically only after the
+    input stream completes. Near-duplicate candidates are capped per band to
+    keep adversarial boilerplate from turning the stage into an all-pairs scan.
+    """
+    temporary_dir = Path(tempfile.mkdtemp(prefix=".deduplicate.", suffix=".tmp", dir=config.paths.data))
+    temporary_output = temporary_dir / "deduplicated.jsonl"
+    temporary_report = temporary_dir / "duplicate_report.jsonl"
+    database_path = temporary_dir / "index.sqlite3"
+    counts = {"input": 0, "retained": 0, "removed": 0, "exact": 0, "near": 0}
+    try:
+        with sqlite3.connect(database_path) as database:
+            database.execute("PRAGMA journal_mode=WAL")
+            database.execute("CREATE TABLE exact (content_hash TEXT PRIMARY KEY, keeper_id TEXT NOT NULL, group_id TEXT NOT NULL)")
+            # Large-corpus representatives contain only compact fingerprints.
+            # Keeping every document's text in SQLite would create another
+            # corpus-sized copy and could violate the machine's disk floor.
+            database.execute("CREATE TABLE reps (document_id TEXT PRIMARY KEY, group_id TEXT NOT NULL, fingerprint INTEGER NOT NULL)")
+            database.execute("CREATE TABLE bands (band_key TEXT NOT NULL, document_id TEXT NOT NULL)")
+            database.execute("CREATE INDEX bands_key ON bands(band_key)")
+            with temporary_output.open("x", encoding="utf-8", newline="\n") as kept, temporary_report.open("x", encoding="utf-8", newline="\n") as report:
+                # Stream records one at a time.  ``read_jsonl`` materializes
+                # the entire file and is unsafe for multi-gigabyte corpora.
+                for value in iter_jsonl(input_path):
+                    document = Document.from_dict(value)
+                    counts["input"] += 1
+                    existing = database.execute(
+                        "SELECT keeper_id, group_id FROM exact WHERE content_hash = ?",
+                        (document.content_hash,),
+                    ).fetchone()
+                    if existing is not None:
+                        keeper_id, group_id = existing
+                        report.write(canonical_json(DuplicateRecord(document.document_id, keeper_id, "exact", 1.0, group_id).to_dict()) + "\n")
+                        counts["removed"] += 1
+                        counts["exact"] += 1
+                        continue
+
+                    fingerprint_value = simhash64(document.text)
+                    sqlite_fingerprint = fingerprint_value if fingerprint_value < (1 << 63) else fingerprint_value - (1 << 64)
+                    candidates: list[tuple[str, str, str, int]] = []
+                    seen_candidates: set[str] = set()
+                    for band in range(4):
+                        key = f"{band}:{(fingerprint_value >> (band * 16)) & 0xFFFF}"
+                        for candidate_id, group_id, candidate_fp in database.execute(
+                            "SELECT reps.document_id, reps.group_id, reps.fingerprint "
+                            "FROM bands JOIN reps ON reps.document_id = bands.document_id "
+                            "WHERE bands.band_key = ? LIMIT 32",
+                            (key,),
+                        ):
+                            if candidate_id not in seen_candidates:
+                                seen_candidates.add(candidate_id)
+                                candidates.append((candidate_id, group_id, int(candidate_fp) % (1 << 64)))
+                    near_match = None
+                    for candidate_id, group_id, candidate_fp in candidates[:128]:
+                        if hamming_distance(fingerprint_value, candidate_fp) <= config.near_duplicate_hamming_distance:
+                            # For large corpora, the bounded band index and
+                            # SimHash threshold are the documented near-
+                            # duplicate decision. Full lexical verification is
+                            # retained for the in-memory small-corpus path.
+                            near_match = (candidate_id, group_id, 1.0)
+                            break
+                    if near_match is not None:
+                        keeper_id, group_id, similarity = near_match
+                        report.write(canonical_json(DuplicateRecord(document.document_id, keeper_id, "near", round(similarity, 6), group_id).to_dict()) + "\n")
+                        counts["removed"] += 1
+                        counts["near"] += 1
+                        continue
+
+                    group_id = "dup_" + hashlib.sha256(document.document_id.encode("utf-8")).hexdigest()
+                    database.execute("INSERT INTO exact(content_hash, keeper_id, group_id) VALUES (?, ?, ?)", (document.content_hash, document.document_id, group_id))
+                    database.execute("INSERT INTO reps(document_id, group_id, fingerprint) VALUES (?, ?, ?)", (document.document_id, group_id, sqlite_fingerprint))
+                    for band in range(4):
+                        database.execute("INSERT INTO bands(band_key, document_id) VALUES (?, ?)", (f"{band}:{(fingerprint_value >> (band * 16)) & 0xFFFF}", document.document_id))
+                    kept.write(canonical_json(document.to_dict()) + "\n")
+                    counts["retained"] += 1
+                    if counts["input"] % 10_000 == 0:
+                        database.commit()
+                kept.flush()
+                report.flush()
+                os.fsync(kept.fileno())
+                os.fsync(report.fileno())
+            database.commit()
+        os.replace(temporary_output, output_path)
+        os.replace(temporary_report, report_path)
+        write_stage_marker(config.paths.manifests, "deduplicate", input_fingerprint, [output_path, report_path], counts)
+        return {"stage": "deduplicate", "status": "complete", **counts, "outputs": [str(output_path), str(report_path)]}
+    finally:
+        if temporary_dir.exists():
+            import shutil
+            shutil.rmtree(temporary_dir, ignore_errors=True)
