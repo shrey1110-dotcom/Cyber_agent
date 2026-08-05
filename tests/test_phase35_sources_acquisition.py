@@ -226,14 +226,14 @@ def test_safe_7z_extractor_allows_one_declared_member_and_enforces_size(tmp_path
     archive = tmp_path / "posts.7z"
     payload = b"<posts><row Id='1' Body='hello'/></posts>"
     with py7zr.SevenZipFile(archive, mode="w") as bundle:
-        bundle.writestr(payload, "stackoverflow.com-Posts/Posts.xml")
-        bundle.writestr(b"ignore", "stackoverflow.com-Posts/Users.xml")
+        bundle.writestr(payload, "Posts.xml")
+        bundle.writestr(b"ignore", "Users.xml")
 
     output = tmp_path / "extracted" / "Posts.xml"
     report = safe_extract_7z_member(
         archive,
         output,
-        member_name="stackoverflow.com-Posts/Posts.xml",
+        member_name="Posts.xml",
         maximum_uncompressed_bytes=1000,
     )
 
@@ -244,14 +244,14 @@ def test_safe_7z_extractor_allows_one_declared_member_and_enforces_size(tmp_path
         safe_extract_7z_member(
             archive,
             output,
-            member_name="stackoverflow.com-Posts/Posts.xml",
+            member_name="Posts.xml",
             maximum_uncompressed_bytes=1000,
         )
     with pytest.raises(ValueError, match="decompressed-byte limit"):
         safe_extract_7z_member(
             archive,
             tmp_path / "too-small.xml",
-            member_name="stackoverflow.com-Posts/Posts.xml",
+            member_name="Posts.xml",
             maximum_uncompressed_bytes=10,
         )
 

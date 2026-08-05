@@ -37,7 +37,7 @@ def _source() -> SourceDefinition:
             "approved_domains": ["approved.example"],
             "adapter_options": {
                 "site_base_url": "https://stackoverflow.com",
-                "posts_member_name": "stackoverflow.com-Posts/Posts.xml",
+                "posts_member_name": "Posts.xml",
             },
         }
     )

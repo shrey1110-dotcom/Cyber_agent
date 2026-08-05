@@ -1058,7 +1058,7 @@
       "maximum_download_bytes": 24000000000,
       "content_categories": ["code", "linux", "networking", "cybersecurity"],
       "known_risks": ["A historical Internet Archive copy is not itself a legal approval. Exact archive identity, redirect domains, decompressed XML size, per-post license mapping, contributor attribution, deletions, and downstream CC BY-SA obligations must be reviewed before enabling. The published upstream integrity value is legacy SHA-1 only."],
-      "adapter_options": {"site_base_url": "https://stackoverflow.com", "posts_member_name": "stackoverflow.com-Posts/Posts.xml"}
+      "adapter_options": {"site_base_url": "https://stackoverflow.com", "posts_member_name": "Posts.xml"}
     },
     {
       "source_name": "fastapi-0.115.12-code-reuse",
