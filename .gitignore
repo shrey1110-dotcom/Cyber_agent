@@ -29,6 +29,9 @@ data/sources/*
 !data/sources/.gitkeep
 data/generated/*
 !data/generated/.gitkeep
+# Isolated larger research collections; source data and resumable partial
+# downloads are generated artifacts just like the default pilot directories.
+data/collections/
 
 # Generated tokenizer candidates and explicitly exported local finals.
 artifacts/tokenizers/candidates/*
@@ -38,3 +41,7 @@ artifacts/tokenizers/final/*
 artifacts/tokenizers/comparison_report.json
 artifacts/datasets/snapshots/*
 !artifacts/datasets/snapshots/.gitkeep
+
+# Randomly initialized local model checkpoints and training metrics.
+artifacts/training/*
+!artifacts/training/.gitkeep

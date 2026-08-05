@@ -27,6 +27,14 @@ retrieval date, domains, provenance URL, and materializer. The initial set is:
 
 - Python 3.13 documentation snapshot under the stated PSF terms;
 - Requests v2.32.4 source under its stated Apache-2.0 license;
+- HTTPX 0.28.1 source under its stated BSD-3-Clause license;
+- Black 26.5.1 source under its stated MIT license;
+- Moby `docker-v29.0.0` source under its stated Apache-2.0 license;
+- Cosign v3.0.6 source under its stated Apache-2.0 license;
+- FastAPI 0.115.12 English documentation under its stated MIT license;
+- Trivy v0.66.0 documentation under its stated Apache-2.0 license;
+- OpenTelemetry Collector v0.153.0 documentation under its stated Apache-2.0 license;
+- YARA v4.5.5 documentation under its stated BSD-3-Clause license;
 - Git 2.50.0 documentation and selected shell/configuration files, recorded as
   GPL-2.0-only and requiring review before publication;
 - Linux man-pages 6.15, recorded as `REVIEW_REQUIRED` because file-level terms
@@ -38,6 +46,10 @@ retrieval date, domains, provenance URL, and materializer. The initial set is:
 This configuration is not a legal conclusion. Records labeled
 `REVIEW_REQUIRED`, and every included source while `release_cleared` is false,
 must be reviewed or removed before open-weight publication.
+
+Only enabled records with review status `approved_for_pilot` or
+`approved_for_production` can be acquired or ingested. A previously
+materialized manifest does not override a later disabled or pending status.
 
 ## Acquisition
 
@@ -56,9 +68,10 @@ python -m cyber_agent.data_pipeline.cli acquire-pilot \
 Without `--confirm-download`, the command fails before writing acquisition
 outputs. The downloader retains the Phase 3.5 HTTPS/domain/redirect,
 content-length, budget, timeout, retry, resume, rate-limit, checksum, temporary
-file, and atomic rename protections. ZIP/TAR expansion rejects traversal,
-links, special files, excess file counts, excess expanded bytes, and excessive
-compression ratios. Downloaded code and scripts are never executed.
+file, and atomic rename protections. ZIP/TAR expansion rejects traversal and
+all excess file-count, expanded-byte, and compression-ratio limits; it skips
+and counts link and special-file entries rather than creating or following them.
+Downloaded code and scripts are never executed.
 
 Materializers accept only bounded UTF-8 text. They reject minified, generated,
 vendored, hidden dependency, extremely large, binary, and malformed files.
@@ -114,4 +127,3 @@ Training reads only the frozen training manifest. Validation, test, and
 representative technical fixtures are evaluation-only. A sufficiently large
 local corpus may receive a local research recommendation, but that
 recommendation never clears publication and never triggers final export.
-

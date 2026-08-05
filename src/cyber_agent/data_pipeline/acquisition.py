@@ -22,6 +22,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, Callable
 
+import py7zr
+from py7zr.io import Py7zIO, WriterFactory
+
 from cyber_agent.data_pipeline.config import PipelineConfig
 from cyber_agent.data_pipeline.export import atomic_write_json
 from cyber_agent.data_pipeline.schemas import utc_now
@@ -36,6 +39,7 @@ class DownloadSpec:
     allowed_domains: tuple[str, ...]
     maximum_bytes: int
     expected_sha256: str | None = None
+    expected_sha1: str | None = None
     timeout_seconds: float = 30.0
     retry_limit: int = 3
     user_agent: str = "cyber-agent-pilot-acquisition/0.1 (+local auditable research pipeline)"
@@ -47,7 +51,7 @@ class DownloadSpec:
             raise ValueError("approved downloads require an exact HTTPS URL")
         if parsed.username or parsed.password:
             raise ValueError("download URLs must not embed authentication credentials")
-        if parsed.hostname.casefold() not in {domain.casefold() for domain in self.allowed_domains}:
+        if not _domain_allowed(parsed.hostname, self.allowed_domains):
             raise ValueError("download URL domain is outside the approved domain allowlist")
         if self.maximum_bytes < 1 or self.retry_limit < 0 or self.timeout_seconds <= 0:
             raise ValueError("download limits, timeout, and retries must be valid")
@@ -55,6 +59,10 @@ class DownloadSpec:
             expected = self.expected_sha256.casefold()
             if len(expected) != 64 or any(character not in "0123456789abcdef" for character in expected):
                 raise ValueError("expected_sha256 must be a full hexadecimal SHA-256 digest")
+        if self.expected_sha1 is not None:
+            expected = self.expected_sha1.casefold()
+            if len(expected) != 40 or any(character not in "0123456789abcdef" for character in expected):
+                raise ValueError("expected_sha1 must be a full hexadecimal SHA-1 digest")
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,13 +84,39 @@ def sha256_path(path: Path) -> str:
     return digest.hexdigest()
 
 
+def sha1_path(path: Path) -> str:
+    """Verify a publisher's legacy SHA-1 only when no stronger digest exists.
+
+    SHA-256 remains the pipeline's identity and snapshot digest.  This merely
+    preserves an upstream release check, never a security boundary of our own.
+    """
+    digest = hashlib.sha1()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _domain_allowed(hostname: str, allowed_domains: tuple[str, ...] | list[str] | set[str]) -> bool:
+    host = hostname.casefold().rstrip(".")
+    for configured in allowed_domains:
+        domain = configured.casefold().rstrip(".")
+        if domain.startswith("*."):
+            suffix = domain[2:]
+            if host.endswith("." + suffix) and host != suffix:
+                return True
+        elif host == domain:
+            return True
+    return False
+
+
 class _ApprovedRedirectHandler(urllib.request.HTTPRedirectHandler):
     def __init__(self, allowed_domains: tuple[str, ...]) -> None:
-        self.allowed_domains = {domain.casefold() for domain in allowed_domains}
+        self.allowed_domains = allowed_domains
 
     def redirect_request(self, req: urllib.request.Request, fp: BinaryIO, code: int, msg: str, headers: Any, newurl: str):
         parsed = urllib.parse.urlparse(newurl)
-        if parsed.scheme != "https" or not parsed.hostname or parsed.hostname.casefold() not in self.allowed_domains:
+        if parsed.scheme != "https" or not parsed.hostname or not _domain_allowed(parsed.hostname, self.allowed_domains):
             raise ValueError("redirect target is outside the approved HTTPS domain allowlist")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
@@ -118,7 +152,7 @@ def download_file(
             response = request_opener(request, timeout=spec.timeout_seconds)
             final_url = getattr(response, "geturl", lambda: spec.url)()
             final_host = urllib.parse.urlparse(final_url).hostname
-            if not final_host or final_host.casefold() not in {domain.casefold() for domain in spec.allowed_domains}:
+            if not final_host or not _domain_allowed(final_host, spec.allowed_domains):
                 raise ValueError("response URL is outside the approved domain allowlist")
             status = int(getattr(response, "status", 200))
             append = current_size > 0 and status == 206
@@ -151,6 +185,9 @@ def download_file(
             digest = sha256_path(temporary)
             if spec.expected_sha256 and digest != spec.expected_sha256.casefold():
                 raise ValueError("download checksum does not match the published checksum")
+            published_sha1 = sha1_path(temporary) if spec.expected_sha1 else None
+            if spec.expected_sha1 and published_sha1 != spec.expected_sha1.casefold():
+                raise ValueError("download SHA-1 checksum does not match the published checksum")
             os.replace(temporary, destination)
             return {
                 "source_name": spec.source_name,
@@ -160,6 +197,7 @@ def download_file(
                 "path": str(destination),
                 "bytes": destination.stat().st_size,
                 "sha256": digest,
+                "published_sha1": published_sha1,
                 "resumed_from_bytes": resumed_from,
                 "attempts": attempt + 1,
                 "completed_at": utc_now(),
@@ -186,8 +224,9 @@ def acquire_reviewed_source(config: PipelineConfig, source_name: str) -> dict[st
         exact_release_or_version=source.exact_release_or_version,
         url=source.download_location,
         allowed_domains=source.approved_domains or (parsed.hostname or "",),
-        maximum_bytes=config.pilot_budget.maximum_download_bytes,
+        maximum_bytes=min(config.pilot_budget.maximum_download_bytes, source.maximum_download_bytes or config.pilot_budget.maximum_download_bytes),
         expected_sha256=source.published_sha256 or None,
+        expected_sha1=source.published_sha1 or None,
         timeout_seconds=config.pilot_budget.request_timeout_seconds,
         retry_limit=config.pilot_budget.maximum_retries,
     )
@@ -221,6 +260,7 @@ def safe_extract_archive(archive: Path, destination: Path, limits: ExtractionLim
     temporary: Path | None = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent))
     file_count = 0
     total_bytes = 0
+    skipped_unsafe_members = 0
     compressed_bytes = max(1, archive.stat().st_size)
     try:
         if zipfile.is_zipfile(archive):
@@ -232,7 +272,11 @@ def safe_extract_archive(archive: Path, destination: Path, limits: ExtractionLim
                         continue
                     unix_mode = (info.external_attr >> 16) & 0o170000
                     if unix_mode == 0o120000:
-                        raise ValueError("archive symbolic links are not allowed")
+                        # Never create or follow archive links.  Skipping them
+                        # permits ordinary source archives containing harmless
+                        # convenience links without weakening extraction bounds.
+                        skipped_unsafe_members += 1
+                        continue
                     members.append((path, info.file_size, lambda info=info: bundle.open(info, "r")))
                 file_count, total_bytes = _extract_members(members, temporary, compressed_bytes, selected_limits)
         elif tarfile.is_tarfile(archive):
@@ -243,17 +287,136 @@ def safe_extract_archive(archive: Path, destination: Path, limits: ExtractionLim
                     if info.isdir():
                         continue
                     if not info.isfile() or info.issym() or info.islnk():
-                        raise ValueError("archive links and special files are not allowed")
+                        # The member name has already passed traversal checks;
+                        # links and device/special members are deliberately not
+                        # extracted and are counted for the audit trail.
+                        skipped_unsafe_members += 1
+                        continue
                     members.append((path, info.size, lambda info=info: bundle.extractfile(info)))
                 file_count, total_bytes = _extract_members(members, temporary, compressed_bytes, selected_limits)
         else:
             raise ValueError("unsupported archive type; only ZIP and TAR are accepted")
         os.replace(temporary, destination)
         temporary = None
-        return {"files": file_count, "uncompressed_bytes": total_bytes, "destination": str(destination)}
+        return {
+            "files": file_count,
+            "uncompressed_bytes": total_bytes,
+            "skipped_unsafe_members": skipped_unsafe_members,
+            "destination": str(destination),
+        }
     finally:
         if temporary is not None and temporary.exists() and temporary.is_dir():
             shutil.rmtree(temporary)
+
+
+class _Bounded7zMemberWriter(Py7zIO):
+    """Write one declared 7z member to a private temporary file.
+
+    The factory deliberately discards the archive's requested destination path.
+    This prevents archive member names from selecting a host path while still
+    allowing py7zr's streaming decompressor to write the selected payload.
+    """
+
+    def __init__(self, path: Path, maximum_bytes: int) -> None:
+        self.path = path
+        self.maximum_bytes = maximum_bytes
+        self.written = 0
+        self._handle = path.open("xb+")
+
+    def write(self, value: bytes | bytearray) -> int:
+        self.written += len(value)
+        if self.written > self.maximum_bytes:
+            raise ValueError("7z member exceeds configured decompressed-byte limit")
+        return self._handle.write(value)
+
+    def read(self, size: int | None = None) -> bytes:
+        return self._handle.read(-1 if size is None else size)
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        return self._handle.seek(offset, whence)
+
+    def flush(self) -> None:
+        self._handle.flush()
+
+    def size(self) -> int:
+        return self.written
+
+    def close(self) -> None:
+        if not self._handle.closed:
+            self._handle.flush()
+            os.fsync(self._handle.fileno())
+            self._handle.close()
+
+
+class _SingleMemberWriterFactory(WriterFactory):
+    def __init__(self, expected_member: str, destination: Path, maximum_bytes: int) -> None:
+        self.expected_member = expected_member
+        self.destination = destination
+        self.maximum_bytes = maximum_bytes
+        self.writer: _Bounded7zMemberWriter | None = None
+
+    def create(self, filename: str) -> Py7zIO:
+        if filename.replace("\\", "/") != self.expected_member:
+            raise ValueError("7z extraction attempted an undeclared member")
+        if self.writer is not None:
+            raise ValueError("7z extraction attempted to create the member more than once")
+        self.writer = _Bounded7zMemberWriter(self.destination, self.maximum_bytes)
+        return self.writer
+
+
+def safe_extract_7z_member(
+    archive: Path,
+    destination: Path,
+    *,
+    member_name: str,
+    maximum_uncompressed_bytes: int,
+) -> dict[str, Any]:
+    """Extract exactly one regular 7z member under bounded, atomic controls.
+
+    This is intentionally narrower than a generic 7z extractor: callers must
+    declare the exact member name in reviewed source configuration.  Link,
+    traversal, multiple-member, and expansion attempts fail before a completed
+    output becomes visible.
+    """
+    normalized_member = _safe_member_path(member_name).as_posix()
+    if normalized_member != member_name.replace("\\", "/"):
+        raise ValueError("7z member name must already be normalized")
+    if maximum_uncompressed_bytes < 1:
+        raise ValueError("7z decompressed-byte limit must be positive")
+    if destination.exists():
+        raise ValueError("7z destination already exists; extraction is immutable")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.part")
+    if temporary.exists():
+        raise ValueError("incomplete 7z member extraction requires explicit recovery")
+    try:
+        with py7zr.SevenZipFile(archive, mode="r") as bundle:
+            matching = [item for item in bundle.list() if item.filename.replace("\\", "/") == normalized_member]
+            if len(matching) != 1:
+                raise ValueError("7z archive must contain exactly one declared member")
+            item = matching[0]
+            _safe_member_path(item.filename)
+            if not item.is_file or item.is_symlink or item.uncompressed < 0:
+                raise ValueError("declared 7z member is not a regular file")
+            if item.uncompressed > maximum_uncompressed_bytes:
+                raise ValueError("7z member exceeds configured decompressed-byte limit")
+            factory = _SingleMemberWriterFactory(normalized_member, temporary, maximum_uncompressed_bytes)
+            bundle.extract(targets=[item.filename], factory=factory)
+            if factory.writer is None:
+                raise ValueError("7z extraction did not create the declared member")
+            factory.writer.close()
+        if temporary.stat().st_size != matching[0].uncompressed:
+            raise ValueError("7z extracted member size does not match archive metadata")
+        os.replace(temporary, destination)
+        return {
+            "member": normalized_member,
+            "uncompressed_bytes": destination.stat().st_size,
+            "destination": str(destination),
+        }
+    except Exception:
+        if temporary.exists():
+            temporary.unlink()
+        raise
 
 
 def _extract_members(

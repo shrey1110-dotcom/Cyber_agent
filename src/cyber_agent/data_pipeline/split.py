@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import tempfile
 from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 from cyber_agent.data_pipeline.config import PipelineConfig
 from cyber_agent.data_pipeline.export import (
     atomic_write_jsonl,
     fingerprint,
+    iter_jsonl,
     read_jsonl,
     stage_is_current,
     write_stage_marker,
 )
-from cyber_agent.data_pipeline.schemas import Document, SplitAssignment, SplitName
+from cyber_agent.data_pipeline.schemas import Document, SplitAssignment, SplitName, canonical_json
 
 
 def split_documents(
@@ -102,20 +106,38 @@ def run_split(config: PipelineConfig, *, seed: int | None = None, force: bool = 
     )
     if not force and stage_is_current(config.paths.manifests, "split", input_fingerprint, outputs):
         return {"stage": "split", "status": "skipped", "seed": selected_seed, "outputs": [str(path) for path in outputs]}
-    documents = [Document.from_dict(value) for value in read_jsonl(input_path)]
-    split_map, assignments = split_documents(
-        documents,
-        seed=selected_seed,
-        proportions=config.split_proportions,
-    )
-    for name, path in split_paths.items():
-        atomic_write_jsonl(path, (document.to_dict() for document in split_map[name]))
-    atomic_write_jsonl(manifest_path, (assignment.to_dict() for assignment in assignments))
-    for name, path in per_split_manifest_paths.items():
-        atomic_write_jsonl(
-            path,
-            (assignment.to_dict() for assignment in assignments if assignment.split == name),
-        )
-    counts = {name: len(documents_in_split) for name, documents_in_split in split_map.items()}
+    temporary_dir = Path(tempfile.mkdtemp(prefix=".split.", suffix=".tmp", dir=config.paths.data))
+    temporary_paths = {name: temporary_dir / path.name for name, path in split_paths.items()}
+    temporary_manifest = temporary_dir / manifest_path.name
+    temporary_per_split = {name: temporary_dir / path.name for name, path in per_split_manifest_paths.items()}
+    counts = {"train": 0, "validation": 0, "test": 0}; group_splits: dict[str, str] = {}; seen_hashes: dict[str, str] = {}
+    try:
+        handles = {name: temporary_paths[name].open("x", encoding="utf-8", newline="\n") for name in split_paths}
+        manifests = {name: temporary_per_split[name].open("x", encoding="utf-8", newline="\n") for name in split_paths}
+        master = temporary_manifest.open("x", encoding="utf-8", newline="\n")
+        try:
+            train_boundary = config.split_proportions["train"]; validation_boundary = train_boundary + config.split_proportions["validation"]
+            for value in iter_jsonl(input_path):
+                document = Document.from_dict(value); group_id = str(document.metadata.get("duplicate_group_id", document.document_id))
+                previous_hash_split = seen_hashes.get(document.content_hash)
+                if previous_hash_split is not None:
+                    split_name = previous_hash_split
+                elif group_id in group_splits:
+                    split_name = group_splits[group_id]
+                else:
+                    digest = hashlib.sha256(f"{selected_seed}:{group_id}".encode("utf-8")).digest(); fraction = int.from_bytes(digest[:8], "big") / 2**64
+                    split_name = "train" if fraction < train_boundary else "validation" if fraction < validation_boundary else "test"; group_splits[group_id] = split_name
+                if previous_hash_split is not None and previous_hash_split != split_name: raise ValueError("content hash leaks across splits")
+                seen_hashes[document.content_hash] = split_name
+                assignment = SplitAssignment(document.document_id, group_id, split_name, document.source_name, document.content_hash)
+                handles[split_name].write(canonical_json(document.to_dict()) + "\n"); encoded = canonical_json(assignment.to_dict()) + "\n"
+                manifests[split_name].write(encoded); master.write(encoded); counts[split_name] += 1
+            for handle in [*handles.values(), *manifests.values(), master]: handle.flush(); os.fsync(handle.fileno())
+        finally:
+            for handle in [*handles.values(), *manifests.values(), master]: handle.close()
+        for name in split_paths: os.replace(temporary_paths[name], split_paths[name]); os.replace(temporary_per_split[name], per_split_manifest_paths[name])
+        os.replace(temporary_manifest, manifest_path)
+    finally:
+        import shutil; shutil.rmtree(temporary_dir, ignore_errors=True)
     write_stage_marker(config.paths.manifests, "split", input_fingerprint, outputs, counts)
     return {"stage": "split", "status": "complete", "seed": selected_seed, **counts, "outputs": [str(path) for path in outputs]}

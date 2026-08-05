@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "collection": "research-3b-tech-v1",
+  "budget_profile": "research_3b_technical_budget.json",
+  "purpose": "Private local-research technical tranche from one exact Stack Overflow archive. It is independently deduplicated and must be combined only through a later explicit mixture manifest with the general tranche and existing technical snapshot.",
+  "sources": [
+    {
+      "source_name": "stack-overflow-posts-20240407-candidate",
+      "exact_release_or_version": "internet-archive-stackexchange-item-2024-04-07",
+      "download_location": "https://archive.org/download/stackexchange/stackoverflow.com-Posts.7z"
+    }
+  ]
+}

@@ -2,22 +2,26 @@
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import tempfile
 import unicodedata
 from pathlib import Path
 from typing import Any
 
 from cyber_agent.data_pipeline.config import PipelineConfig
-from cyber_agent.data_pipeline.export import (
-    atomic_write_jsonl,
-    fingerprint,
-    read_jsonl,
-    stage_is_current,
-    write_stage_marker,
-)
+from cyber_agent.data_pipeline.export import fingerprint, iter_jsonl, stage_is_current, write_stage_marker
 from cyber_agent.data_pipeline.extract import extract_text
 from cyber_agent.data_pipeline.quality import assess_quality
-from cyber_agent.data_pipeline.schemas import Document, RawDocument, RejectionRecord, sha256_text, utc_now
+from cyber_agent.data_pipeline.schemas import (
+    Document,
+    RawDocument,
+    RejectionRecord,
+    canonical_json,
+    sha256_text,
+    utc_now,
+)
 from cyber_agent.data_pipeline.sensitive_data import detect_sensitive_data, redact_sensitive_data
 
 
@@ -26,6 +30,11 @@ BOILERPLATE_PATTERNS = (
     re.compile(r"^(home|products|pricing|documentation)(\s*[|>]\s*(home|products|pricing|documentation))*$", re.IGNORECASE),
     re.compile(r"^(copyright|all rights reserved)\b", re.IGNORECASE),
 )
+# reStructuredText and similar documentation formats use long runs of one
+# punctuation character as heading adornments.  They are presentation syntax,
+# not content; retaining them incorrectly trips the repeated-character safety
+# check.  This is deliberately applied only to prose, never source code.
+STRUCTURAL_ADORNMENT = re.compile(r"^[!#%&'*+,-./:=?@^_`|~]{4,}$")
 
 
 def remove_control_characters(value: str) -> str:
@@ -47,6 +56,8 @@ def normalize_text(value: str, *, preserve_code: bool) -> str:
     seen_short_lines: set[str] = set()
     for raw_line in normalized.split("\n"):
         line = re.sub(r"[ \t]+", " ", raw_line).strip()
+        if line and STRUCTURAL_ADORNMENT.fullmatch(line):
+            continue
         if line and any(pattern.search(line) for pattern in BOILERPLATE_PATTERNS):
             continue
         comparison = line.casefold()
@@ -70,85 +81,111 @@ def run_clean(config: PipelineConfig, *, force: bool = False) -> dict[str, Any]:
     if not force and stage_is_current(config.paths.manifests, "clean", input_fingerprint, outputs):
         return {"stage": "clean", "status": "skipped", "outputs": [str(path) for path in outputs]}
 
-    raw_documents = [RawDocument.from_dict(value) for value in read_jsonl(raw_path)]
-    extracted_documents: list[RawDocument] = []
-    accepted: list[Document] = []
-    rejected: list[RejectionRecord] = []
+    # Keep the clean stage bounded: the research collection can exceed the RAM
+    # budget of a laptop even though individual documents are deliberately small.
+    temporary: Path | None = Path(tempfile.mkdtemp(prefix=".clean.", suffix=".tmp", dir=config.paths.data))
+    extracted_temporary = temporary / "extracted.jsonl"
+    cleaned_temporary = temporary / "cleaned.jsonl"
+    rejected_temporary = temporary / "rejected.jsonl"
+    input_count = 0
+    accepted_count = 0
+    rejected_count = 0
+    try:
+        assert temporary is not None
+        with (
+            extracted_temporary.open("x", encoding="utf-8", newline="\n") as extracted_handle,
+            cleaned_temporary.open("x", encoding="utf-8", newline="\n") as cleaned_handle,
+            rejected_temporary.open("x", encoding="utf-8", newline="\n") as rejected_handle,
+        ):
+            for value in iter_jsonl(raw_path):
+                input_count += 1
+                raw = RawDocument.from_dict(value)
+                try:
+                    extracted_text, extraction_metadata = extract_text(raw.raw_text, raw.media_type)
+                except ValueError as exc:
+                    rejected_handle.write(
+                        canonical_json(_rejection(raw, "extract", "extraction_failed", str(exc)).to_dict()) + "\n"
+                    )
+                    rejected_count += 1
+                    continue
 
-    for raw in raw_documents:
-        try:
-            extracted_text, extraction_metadata = extract_text(raw.raw_text, raw.media_type)
-        except ValueError as exc:
-            rejected.append(_rejection(raw, "extract", "extraction_failed", str(exc)))
-            continue
+                normalized = normalize_text(extracted_text, preserve_code=raw.category == "code")
+                findings = detect_sensitive_data(normalized)
+                if findings and config.sensitive_data_action == "reject":
+                    rejection = _rejection(
+                        raw,
+                        "sensitive_data",
+                        "sensitive_data_detected",
+                        "sensitive or personal data detected",
+                        tuple(sorted({finding.kind for finding in findings})),
+                    )
+                    rejected_handle.write(canonical_json(rejection.to_dict()) + "\n")
+                    rejected_count += 1
+                    continue
+                if findings:
+                    normalized = redact_sensitive_data(normalized, findings)
 
-        normalized = normalize_text(extracted_text, preserve_code=raw.category == "code")
-        findings = detect_sensitive_data(normalized)
-        if findings and config.sensitive_data_action == "reject":
-            rejected.append(
-                _rejection(
-                    raw,
-                    "sensitive_data",
-                    "sensitive_data_detected",
-                    "sensitive or personal data detected",
-                    tuple(sorted({finding.kind for finding in findings})),
+                extracted = RawDocument(
+                    document_id=raw.document_id,
+                    raw_text=normalized,
+                    source_name=raw.source_name,
+                    source_url=raw.source_url,
+                    license=raw.license,
+                    category=raw.category,
+                    language=raw.language,
+                    retrieved_at=raw.retrieved_at,
+                    media_type="text/plain",
+                    attribution_requirements=raw.attribution_requirements,
+                    metadata={**raw.metadata, **extraction_metadata},
                 )
-            )
-            continue
-        if findings:
-            normalized = redact_sensitive_data(normalized, findings)
+                extracted_handle.write(canonical_json(extracted.to_dict()) + "\n")
 
-        extracted = RawDocument(
-            document_id=raw.document_id,
-            raw_text=normalized,
-            source_name=raw.source_name,
-            source_url=raw.source_url,
-            license=raw.license,
-            category=raw.category,
-            language=raw.language,
-            retrieved_at=raw.retrieved_at,
-            media_type="text/plain",
-            attribution_requirements=raw.attribution_requirements,
-            metadata={**raw.metadata, **extraction_metadata},
-        )
-        extracted_documents.append(extracted)
-
-        assessment = assess_quality(normalized, raw.category, config)
-        if not assessment.accepted:
-            rejected.append(
-                _rejection(raw, "quality", "quality_rejected", assessment.summary, tuple(assessment.reason_codes))
-            )
-            continue
-        metadata = {
-            **extracted.metadata,
-            "attribution_requirements": raw.attribution_requirements,
-            "quality_components": assessment.components,
-        }
-        accepted.append(
-            Document(
-                document_id=raw.document_id,
-                text=normalized,
-                source_name=raw.source_name,
-                source_url=raw.source_url,
-                license=raw.license,
-                category=raw.category,
-                language=raw.language,
-                retrieved_at=raw.retrieved_at,
-                content_hash=sha256_text(normalized),
-                quality_score=assessment.score,
-                metadata=metadata,
-            )
-        )
-
-    accepted.sort(key=lambda document: document.document_id)
-    extracted_documents.sort(key=lambda document: document.document_id)
-    rejected.sort(key=lambda record: record.document_id)
-    atomic_write_jsonl(extracted_path, (document.to_dict() for document in extracted_documents))
-    atomic_write_jsonl(cleaned_path, (document.to_dict() for document in accepted))
-    atomic_write_jsonl(rejected_path, (record.to_dict() for record in rejected))
-    counts = {"input": len(raw_documents), "accepted": len(accepted), "rejected": len(rejected)}
-    write_stage_marker(config.paths.manifests, "clean", input_fingerprint, outputs, counts)
-    return {"stage": "clean", "status": "complete", **counts, "outputs": [str(path) for path in outputs]}
+                assessment = assess_quality(normalized, raw.category, config)
+                if not assessment.accepted:
+                    rejection = _rejection(
+                        raw,
+                        "quality",
+                        "quality_rejected",
+                        assessment.summary,
+                        tuple(assessment.reason_codes),
+                    )
+                    rejected_handle.write(canonical_json(rejection.to_dict()) + "\n")
+                    rejected_count += 1
+                    continue
+                metadata = {
+                    **extracted.metadata,
+                    "attribution_requirements": raw.attribution_requirements,
+                    "quality_components": assessment.components,
+                }
+                cleaned = Document(
+                    document_id=raw.document_id,
+                    text=normalized,
+                    source_name=raw.source_name,
+                    source_url=raw.source_url,
+                    license=raw.license,
+                    category=raw.category,
+                    language=raw.language,
+                    retrieved_at=raw.retrieved_at,
+                    content_hash=sha256_text(normalized),
+                    quality_score=assessment.score,
+                    metadata=metadata,
+                )
+                cleaned_handle.write(canonical_json(cleaned.to_dict()) + "\n")
+                accepted_count += 1
+            for handle in (extracted_handle, cleaned_handle, rejected_handle):
+                handle.flush()
+                os.fsync(handle.fileno())
+        os.replace(extracted_temporary, extracted_path)
+        os.replace(cleaned_temporary, cleaned_path)
+        os.replace(rejected_temporary, rejected_path)
+        shutil.rmtree(temporary)
+        temporary = None
+        counts = {"input": input_count, "accepted": accepted_count, "rejected": rejected_count}
+        write_stage_marker(config.paths.manifests, "clean", input_fingerprint, outputs, counts)
+        return {"stage": "clean", "status": "complete", **counts, "outputs": [str(path) for path in outputs]}
+    finally:
+        if temporary is not None:
+            shutil.rmtree(temporary, ignore_errors=True)
 
 
 def _rejection(
@@ -167,4 +204,3 @@ def _rejection(
         rejected_at=utc_now(),
         metadata={"source_url_hash": sha256_text(raw.source_url)},
     )
-

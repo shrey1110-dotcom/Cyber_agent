@@ -10,6 +10,8 @@
     "PSF-2.0": {"status": "allowed", "attribution_required": true},
     "Unlicense": {"status": "allowed", "attribution_required": false},
     "CC-BY-SA-4.0": {"status": "review_required", "attribution_required": true},
+    "CC-BY-SA-3.0": {"status": "review_required", "attribution_required": true},
+    "CC-BY-SA-2.5": {"status": "review_required", "attribution_required": true},
     "GFDL-1.3-or-later": {"status": "review_required", "attribution_required": true},
     "GPL-2.0-only": {"status": "review_required", "attribution_required": true},
     "ODC-BY-1.0": {"status": "review_required", "attribution_required": true},
@@ -19,4 +21,3 @@
     "LicenseRef-Proprietary": {"status": "denied", "attribution_required": true}
   }
 }
-

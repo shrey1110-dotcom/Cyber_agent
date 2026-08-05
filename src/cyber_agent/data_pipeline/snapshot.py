@@ -15,7 +15,13 @@ from typing import Any, Iterable
 
 from cyber_agent.data_pipeline.balance import balance_documents
 from cyber_agent.data_pipeline.config import PipelineConfig
-from cyber_agent.data_pipeline.export import atomic_write_json, atomic_write_jsonl, atomic_write_text, read_jsonl
+from cyber_agent.data_pipeline.export import (
+    atomic_write_json,
+    atomic_write_jsonl,
+    atomic_write_text,
+    iter_jsonl,
+    read_jsonl,
+)
 from cyber_agent.data_pipeline.schemas import Document, canonical_json, utc_now
 from cyber_agent.data_pipeline.sources import SourceDefinition, SourceRegistry
 from cyber_agent.data_pipeline.split import split_documents
@@ -181,7 +187,8 @@ def freeze_snapshot(
         by_source = Counter(document.source_name for document in balance.selected)
         by_category = Counter(document.category for document in balance.selected)
         by_license = Counter(document.license for document in balance.selected)
-        raw_document_count = len(read_jsonl(config.paths.raw / "documents.jsonl")) if (config.paths.raw / "documents.jsonl").exists() else len(documents)
+        raw_path = config.paths.raw / "documents.jsonl"
+        raw_document_count = sum(1 for _ in iter_jsonl(raw_path)) if raw_path.exists() else len(documents)
         representative_samples: dict[str, list[dict[str, Any]]] = {}
         for category in sorted(by_category):
             candidates = sorted(
@@ -234,16 +241,22 @@ def freeze_snapshot(
         }
         atomic_write_json(temporary / "dataset_summary.json", dataset_summary)
 
+        budget_configuration_path = config.paths.configuration / (
+            "research_budget.json" if config.paths.collection is not None else "pilot_budget.json"
+        )
         configuration_paths = (
             config.paths.configuration / "data_pipeline.json",
-            config.paths.configuration / "pilot_budget.json",
+            budget_configuration_path,
             config.paths.configuration / "tokenizer.json",
             config.paths.configuration / "dataset_mode.json",
         )
         source_review_path = config.paths.configuration / "approved_sources.json"
         local_source_path = config.paths.configuration / "local_research_sources.json"
         license_policy_path = config.paths.configuration / "license_policy.json"
+        collection_source_path = config.paths.collection_source_config
         input_paths = [deduplicated_path, source_review_path, local_source_path, license_policy_path, *configuration_paths]
+        if collection_source_path is not None and collection_source_path.exists():
+            input_paths.append(collection_source_path)
         input_hashes = {str(path.relative_to(config.paths.project_root)): sha256_file(path) for path in input_paths}
         output_names = [
             "source_manifest.jsonl", "license_manifest.jsonl", "train_manifest.jsonl",
@@ -282,6 +295,10 @@ def freeze_snapshot(
             "source_review_configuration_hash": _hash_payload({
                 "audited_sources": sha256_file(source_review_path),
                 "local_research_sources": sha256_file(local_source_path),
+                "collection_source_selection": (
+                    sha256_file(collection_source_path)
+                    if collection_source_path is not None and collection_source_path.exists() else None
+                ),
             }),
             "license_policy_hash": sha256_file(license_policy_path),
             "seed": selected_seed,

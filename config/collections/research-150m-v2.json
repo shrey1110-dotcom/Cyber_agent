@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "collection": "research-150m-v2",
+  "purpose": "Private local-research technical complement to frozen research-150m-v1. The existing v1 Wikimedia general corpus is reused only as a separately immutable snapshot, not downloaded or materialized again. Every entry here is an exact release and URL selected from the reviewed source registry; this file does not approve new sources or broaden any licence review.",
+  "sources": [
+    {"source_name": "synthetic-safe-tool-examples-v3", "exact_release_or_version": "generator-v3", "download_location": "local://cyber-agent/synthetic-safe-tool-examples-v3"},
+    {"source_name": "black-26.5.1", "exact_release_or_version": "26.5.1", "download_location": "https://github.com/psf/black/archive/refs/tags/26.5.1.tar.gz"},
+    {"source_name": "requests-2.32.4", "exact_release_or_version": "v2.32.4", "download_location": "https://github.com/psf/requests/archive/refs/tags/v2.32.4.tar.gz"},
+    {"source_name": "httpx-0.28.1", "exact_release_or_version": "0.28.1", "download_location": "https://github.com/encode/httpx/archive/refs/tags/0.28.1.tar.gz"},
+    {"source_name": "fastapi-0.115.12-en-docs", "exact_release_or_version": "0.115.12", "download_location": "https://github.com/FastAPI/FastAPI/archive/refs/tags/0.115.12.tar.gz"},
+    {"source_name": "fastapi-0.115.12-code-reuse", "exact_release_or_version": "0.115.12", "download_location": "https://github.com/FastAPI/FastAPI/archive/refs/tags/0.115.12.tar.gz"},
+    {"source_name": "django-5.1.10-docs", "exact_release_or_version": "5.1.10", "download_location": "https://github.com/django/django/archive/refs/tags/5.1.10.tar.gz"},
+    {"source_name": "sqlalchemy-rel-2.0.40-docs", "exact_release_or_version": "rel_2_0_40", "download_location": "https://github.com/sqlalchemy/sqlalchemy/archive/refs/tags/rel_2_0_40.tar.gz"},
+    {"source_name": "moby-docker-v29.0.0", "exact_release_or_version": "docker-v29.0.0", "download_location": "https://github.com/moby/moby/archive/refs/tags/docker-v29.0.0.tar.gz"},
+    {"source_name": "kubernetes-v1.32.0-docs", "exact_release_or_version": "v1.32.0", "download_location": "https://github.com/kubernetes/kubernetes/archive/refs/tags/v1.32.0.tar.gz"},
+    {"source_name": "kubernetes-v1.32.0-code-reuse", "exact_release_or_version": "v1.32.0", "download_location": "https://github.com/kubernetes/kubernetes/archive/refs/tags/v1.32.0.tar.gz"},
+    {"source_name": "trivy-v0.66.0-docs", "exact_release_or_version": "v0.66.0", "download_location": "https://github.com/aquasecurity/trivy/archive/refs/tags/v0.66.0.tar.gz"},
+    {"source_name": "trivy-v0.66.0-code-reuse", "exact_release_or_version": "v0.66.0", "download_location": "https://github.com/aquasecurity/trivy/archive/refs/tags/v0.66.0.tar.gz"},
+    {"source_name": "yara-v4.5.5-docs", "exact_release_or_version": "v4.5.5", "download_location": "https://github.com/VirusTotal/yara/archive/refs/tags/v4.5.5.tar.gz"},
+    {"source_name": "yara-v4.5.5-code-reuse", "exact_release_or_version": "v4.5.5", "download_location": "https://github.com/VirusTotal/yara/archive/refs/tags/v4.5.5.tar.gz"},
+    {"source_name": "cosign-v3.0.6", "exact_release_or_version": "v3.0.6", "download_location": "https://github.com/sigstore/cosign/archive/refs/tags/v3.0.6.tar.gz"},
+    {"source_name": "syft-v1.20.0-code", "exact_release_or_version": "v1.20.0", "download_location": "https://github.com/anchore/syft/archive/refs/tags/v1.20.0.tar.gz"},
+    {"source_name": "grype-v0.89.0-code", "exact_release_or_version": "v0.89.0", "download_location": "https://github.com/anchore/grype/archive/refs/tags/v0.89.0.tar.gz"},
+    {"source_name": "prometheus-v3.5.0-code", "exact_release_or_version": "v3.5.0", "download_location": "https://github.com/prometheus/prometheus/archive/refs/tags/v3.5.0.tar.gz"},
+    {"source_name": "opentelemetry-collector-v0.153.0-docs", "exact_release_or_version": "v0.153.0", "download_location": "https://github.com/open-telemetry/opentelemetry-collector/archive/refs/tags/v0.153.0.tar.gz"},
+    {"source_name": "opentelemetry-collector-v0.153.0-code-reuse", "exact_release_or_version": "v0.153.0", "download_location": "https://github.com/open-telemetry/opentelemetry-collector/archive/refs/tags/v0.153.0.tar.gz"},
+    {"source_name": "ingress-nginx-controller-v1.12.8-docs", "exact_release_or_version": "controller-v1.12.8", "download_location": "https://github.com/kubernetes/ingress-nginx/archive/refs/tags/controller-v1.12.8.tar.gz"},
+    {"source_name": "istio-1.25.3-docs", "exact_release_or_version": "1.25.3", "download_location": "https://github.com/istio/istio/archive/refs/tags/1.25.3.tar.gz"}
+  ]
+}

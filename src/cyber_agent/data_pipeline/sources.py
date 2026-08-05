@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -39,11 +39,14 @@ class SourceDefinition:
     enabled: bool
     notes: str = ""
     published_sha256: str = ""
+    published_sha1: str = ""
     approved_domains: tuple[str, ...] = ()
     retrieved_at: str = ""
     local_research_source: bool = False
     acquisition_enabled: bool = False
+    maximum_download_bytes: int | None = None
     adapter_options: dict[str, Any] | None = None
+    collection: str = ""
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> SourceDefinition:
@@ -113,11 +116,17 @@ class SourceDefinition:
             **converted,
             notes=value.get("notes", ""),
             published_sha256=value.get("published_sha256", ""),
+            published_sha1=value.get("published_sha1", ""),
             approved_domains=tuple(approved_domains),
             retrieved_at=value.get("retrieved_at", value.get("reviewed_at", "")),
             local_research_source=local_research_source,
             acquisition_enabled=value.get("acquisition_enabled", False),
+            maximum_download_bytes=(
+                int(value["maximum_download_bytes"])
+                if value.get("maximum_download_bytes") is not None else None
+            ),
             adapter_options=value.get("adapter_options", {}),
+            collection=value.get("collection", ""),
         )
 
     def validate(self, license_policy: LicensePolicy) -> list[str]:
@@ -141,6 +150,11 @@ class SourceDefinition:
                 errors.append(f"{self.source_name or '<unnamed>'}: {field_name} is required")
         if self.category not in CATEGORIES:
             errors.append(f"{self.source_name}: unsupported category {self.category}")
+        if self.collection and any(
+            character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+            for character in self.collection
+        ):
+            errors.append(f"{self.source_name}: collection name contains unsupported characters")
         if not self.content_categories or any(category not in CATEGORIES for category in self.content_categories):
             errors.append(f"{self.source_name}: content_categories must contain supported categories")
         if self.category not in self.content_categories:
@@ -151,6 +165,10 @@ class SourceDefinition:
             digest = self.published_sha256.casefold()
             if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
                 errors.append(f"{self.source_name}: published_sha256 is not a full SHA-256 digest")
+        if self.published_sha1:
+            digest = self.published_sha1.casefold()
+            if len(digest) != 40 or any(character not in "0123456789abcdef" for character in digest):
+                errors.append(f"{self.source_name}: published_sha1 is not a full SHA-1 digest")
         rule = license_policy.rule_for(self.license)
         if rule is None:
             errors.append(f"{self.source_name}: license is absent from policy: {self.license}")
@@ -169,6 +187,8 @@ class SourceDefinition:
                 errors.append(f"{self.source_name}: denied terms cannot be used in local research mode")
             if self.acquisition_enabled and self.adapter.startswith("http_") and not self.approved_domains:
                 errors.append(f"{self.source_name}: remote source requires approved_domains")
+            if self.maximum_download_bytes is not None and self.maximum_download_bytes < 1:
+                errors.append(f"{self.source_name}: maximum_download_bytes must be positive when configured")
         if self.enabled and not approved and not self.local_research_source:
             errors.append(f"{self.source_name}: enabled source is not approved for pilot or production")
         if approved and (not self.reviewed_by.strip() or not self.reviewed_at.strip()):
@@ -182,8 +202,19 @@ class SourceDefinition:
                     raise ValueError
             except ValueError:
                 errors.append(f"{self.source_name}: reviewed_at must be timezone-aware ISO-8601")
-        if approved and (rule is None or rule.status != "allowed"):
-            errors.append(f"{self.source_name}: approved source must have an allowed license")
+        # A local-research source may be explicitly reviewed for bounded private
+        # experimentation even when its terms still need release review (for
+        # example CC-BY-SA attribution/share-alike obligations).  It remains
+        # blocked from audited-release mode by DatasetMode and snapshot notices.
+        approval_usable = rule is not None and (
+            rule.status == "allowed"
+            or (self.local_research_source and rule.status == "review_required")
+        )
+        if approved and not approval_usable:
+            errors.append(
+                f"{self.source_name}: approved source must have allowed terms "
+                "or explicitly local-research-usable review-required terms"
+            )
         if self.enabled and not self.local_research_source and (rule is None or rule.status != "allowed"):
             errors.append(f"{self.source_name}: enabled source must have an allowed license")
         return errors
@@ -222,7 +253,57 @@ class SourceRegistry:
                 if not isinstance(local_payload, dict) or not isinstance(local_payload.get("sources"), list):
                     raise ValueError("local_research_sources.json must contain a sources array")
                 definitions.extend(SourceDefinition.from_dict(item) for item in local_payload["sources"])
+        # A named collection may explicitly select exact releases from the
+        # global review registry.  This does not copy, infer, or broaden a
+        # review: every selection must repeat the reviewed release and URL,
+        # and its materialized output is isolated under that collection.
+        selection_path = paths.collection_source_config
+        if selection_path is not None and selection_path.exists():
+            definitions = cls._selected_collection_sources(definitions, paths, selection_path)
         return cls(definitions, paths)
+
+    @staticmethod
+    def _selected_collection_sources(
+        definitions: list[SourceDefinition],
+        paths: PipelinePaths,
+        selection_path: Path,
+    ) -> list[SourceDefinition]:
+        try:
+            payload = json.loads(selection_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"cannot load collection source selection {selection_path}: {exc}") from exc
+        if not isinstance(payload, dict) or payload.get("collection") != paths.collection:
+            raise ValueError("collection source selection must declare the active collection name")
+        selected = payload.get("sources")
+        if not isinstance(selected, list) or not selected:
+            raise ValueError("collection source selection must contain a non-empty sources array")
+        known = {source.source_name: source for source in definitions}
+        output: list[SourceDefinition] = []
+        seen: set[str] = set()
+        for entry in selected:
+            if not isinstance(entry, dict):
+                raise ValueError("collection source selections must be objects")
+            source_name = entry.get("source_name")
+            release = entry.get("exact_release_or_version")
+            location = entry.get("download_location")
+            if not all(isinstance(value, str) and value for value in (source_name, release, location)):
+                raise ValueError("collection source selection requires source_name, exact_release_or_version, and download_location")
+            if source_name in seen:
+                raise ValueError(f"collection source selection repeats source: {source_name}")
+            seen.add(source_name)
+            source = known.get(source_name)
+            if source is None:
+                raise ValueError(f"collection source is not present in the reviewed registry: {source_name}")
+            if source.exact_release_or_version != release or source.download_location != location:
+                raise ValueError(f"collection source release or download URL does not match review record: {source_name}")
+            output.append(
+                replace(
+                    source,
+                    collection=paths.collection or "",
+                    data_location=(paths.sources / source.source_name / "manifest.jsonl").relative_to(paths.project_root).as_posix(),
+                )
+            )
+        return output
 
     def validate(self, license_policy: LicensePolicy) -> list[str]:
         return [error for source in self._sources.values() for error in source.validate(license_policy)]
@@ -234,14 +315,15 @@ class SourceRegistry:
         errors = source.validate(license_policy)
         if errors:
             raise ValueError("; ".join(errors))
-        locally_materialized = source.local_research_source and self.manifest_path(source).is_file()
-        if not source.enabled and not locally_materialized:
+        if not source.enabled:
             raise ValueError(f"source is configured as a disabled placeholder: {source_name}")
-        if not source.is_approved and not source.local_research_source:
+        self._require_collection(source)
+        if not source.is_approved:
             raise ValueError(f"source review status does not permit ingestion: {source_name} ({source.review_status})")
         if source.adapter not in {
             "local_manifest", "synthetic_tool_examples", "http_archive_text",
-            "http_stix_json", "http_cwe_xml",
+            "http_stix_json", "http_cwe_xml", "http_wikimedia_xml_bz2",
+            "http_stackexchange_posts_7z",
         }:
             raise ValueError(f"source adapter is not an ingestible local manifest: {source.adapter}")
         return source
@@ -253,10 +335,13 @@ class SourceRegistry:
         errors = source.validate(license_policy)
         if errors:
             raise ValueError("; ".join(errors))
-        local_download = source.local_research_source and source.acquisition_enabled
-        if (not source.enabled or not source.is_approved) and not local_download:
+        if not source.enabled or not source.is_approved:
             raise ValueError(f"source is not approved for download: {source_name} ({source.review_status})")
-        if source.adapter not in {"http_file", "http_archive", "http_archive_text", "http_stix_json", "http_cwe_xml"}:
+        self._require_collection(source)
+        if source.adapter not in {
+            "http_file", "http_archive", "http_archive_text", "http_stix_json",
+            "http_cwe_xml", "http_wikimedia_xml_bz2", "http_stackexchange_posts_7z",
+        }:
             raise ValueError(f"source has no remote download adapter: {source_name}")
         return source
 
@@ -264,24 +349,41 @@ class SourceRegistry:
         return [
             self.require_ingestible(source.source_name, license_policy)
             for source in self._sources.values()
-            if source.enabled or (source.local_research_source and self.manifest_path(source).is_file())
+            if source.enabled and self._matches_collection(source)
         ]
 
     def acquisition_sources(self, license_policy: LicensePolicy) -> list[SourceDefinition]:
         return [
             self.require_downloadable(source.source_name, license_policy)
             for source in self._sources.values()
-            if source.local_research_source and source.acquisition_enabled and source.adapter.startswith("http_")
+            if source.enabled
+            and source.is_approved
+            and source.local_research_source
+            and source.acquisition_enabled
+            and source.adapter.startswith("http_")
+            and self._matches_collection(source)
         ]
 
     def synthetic_sources(self) -> list[SourceDefinition]:
         return [
             source for source in self._sources.values()
-            if source.local_research_source and source.acquisition_enabled and source.adapter == "synthetic_tool_examples"
+            if source.enabled
+            and source.is_approved
+            and source.local_research_source
+            and source.acquisition_enabled
+            and source.adapter == "synthetic_tool_examples"
+            and self._matches_collection(source)
         ]
 
     def all_sources(self) -> list[SourceDefinition]:
         return list(self._sources.values())
+
+    def source_by_name(self, source_name: str) -> SourceDefinition:
+        """Return a configured source for safe same-release archive reuse checks."""
+        try:
+            return self._sources[source_name]
+        except KeyError as exc:
+            raise ValueError(f"source is not present in the allowlist: {source_name}") from exc
 
     def manifest_path(self, source: SourceDefinition) -> Path:
         path = (self.paths.project_root / source.data_location).resolve()
@@ -290,3 +392,12 @@ class SourceRegistry:
         except ValueError as exc:
             raise ValueError(f"source manifest resolves outside project: {source.source_name}") from exc
         return path
+
+    def _matches_collection(self, source: SourceDefinition) -> bool:
+        return source.collection == (self.paths.collection or "")
+
+    def _require_collection(self, source: SourceDefinition) -> None:
+        if not self._matches_collection(source):
+            configured = source.collection or "default"
+            active = self.paths.collection or "default"
+            raise ValueError(f"source is configured for collection {configured}, not active collection {active}")

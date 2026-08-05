@@ -32,6 +32,15 @@ def test_code_formatting_preserves_leading_whitespace() -> None:
     )
 
 
+def test_prose_heading_adornments_are_removed_before_repetition_checks() -> None:
+    prose = "Security logging\n****************\n\nKeep an auditable event timeline."
+    assert normalize_text(prose, preserve_code=False) == (
+        "Security logging\n\nKeep an auditable event timeline."
+    )
+    code = "banner = '****************'\n"
+    assert normalize_text(code, preserve_code=True) == "banner = '****************'"
+
+
 @pytest.mark.parametrize(
     ("text", "expected_kind"),
     [
