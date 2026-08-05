@@ -14,7 +14,7 @@ from typing import Any, Iterable, Iterator
 
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 
-from cyber_agent.data_pipeline.export import atomic_write_json, atomic_write_text, read_jsonl
+from cyber_agent.data_pipeline.export import atomic_write_json, atomic_write_text, iter_jsonl, read_jsonl
 from cyber_agent.data_pipeline.schemas import Document, utc_now
 from cyber_agent.data_pipeline.snapshot import verify_snapshot
 from cyber_agent.tokenizer.artifacts import verify_candidate, write_candidate_artifacts
@@ -68,7 +68,7 @@ class FrozenCorpusPlan:
     def iter_texts(self) -> Iterator[str]:
         selected = {reference.document_id for reference in self.references}
         yielded: set[str] = set()
-        for value in read_jsonl(self.snapshot_directory / "train_manifest.jsonl"):
+        for value in iter_jsonl(self.snapshot_directory / "train_manifest.jsonl"):
             document = _snapshot_document(value)
             if document.document_id in selected:
                 yielded.add(document.document_id)
@@ -86,11 +86,13 @@ def load_frozen_corpus(config: TokenizerConfig, snapshot_name: str) -> FrozenCor
     train_path = snapshot_directory / "train_manifest.jsonl"
     validation_path = snapshot_directory / "validation_manifest.jsonl"
     test_path = snapshot_directory / "test_manifest.jsonl"
-    train_records = read_jsonl(train_path)
-    validation_records = read_jsonl(validation_path)
-    test_records = read_jsonl(test_path)
+    train_records: list[dict[str, Any]] = []
+    validation_ids: set[str] = set(); test_ids: set[str] = set()
+    for record in iter_jsonl(train_path): train_records.append(record)
+    for record in iter_jsonl(validation_path): validation_ids.add(str(record.get("document_id")))
+    for record in iter_jsonl(test_path): test_ids.add(str(record.get("document_id")))
     train_ids = {str(record.get("document_id")) for record in train_records}
-    heldout_ids = {str(record.get("document_id")) for record in (*validation_records, *test_records)}
+    heldout_ids = validation_ids | test_ids
     if train_ids & heldout_ids:
         raise ValueError("frozen tokenizer training split overlaps validation or test")
     references: list[CorpusDocumentReference] = []
@@ -113,6 +115,9 @@ def load_frozen_corpus(config: TokenizerConfig, snapshot_name: str) -> FrozenCor
         )
     if not references:
         raise ValueError("frozen snapshot has no training documents")
+    # Release the parsed JSON objects before tokenizer training; references
+    # retain only compact provenance fields.
+    train_records.clear()
     hashes = {
         filename: sha256_file(snapshot_directory / filename)
         for filename in (
@@ -126,7 +131,7 @@ def load_frozen_corpus(config: TokenizerConfig, snapshot_name: str) -> FrozenCor
         manifest,
         tuple(references),
         hashes,
-        {"validation": len(validation_records), "test": len(test_records)},
+            {"validation": len(validation_ids), "test": len(test_ids)},
     )
 
 

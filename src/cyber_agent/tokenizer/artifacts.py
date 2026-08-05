@@ -119,7 +119,12 @@ def write_candidate_artifacts(
             "excluded_split_document_counts": corpus.excluded_split_counts,
             "configuration_hash": config.configuration_hash(),
             "tokenizer_artifact_hashes": artifact_hashes,
-            "training_documents": corpus.manifest_documents(),
+            # A per-document manifest is useful for fixtures, but expanding
+            # millions of records into Python dictionaries would exhaust a
+            # laptop's RAM. Large candidates retain the hashed input-manifest
+            # provenance above instead.
+            "training_documents": corpus.manifest_documents() if corpus.document_count < 100_000 else [],
+            "training_documents_omitted": corpus.document_count >= 100_000,
             "fixture_artifact": fixture_artifact,
             "production_ready": False,
             **(manifest_extra or {}),

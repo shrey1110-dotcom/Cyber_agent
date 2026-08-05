@@ -110,6 +110,17 @@ def freeze_snapshot(
     if target.exists():
         raise ValueError(f"frozen snapshot already exists and cannot be overwritten: {directory_name}")
 
+    # Large collections already have balanced, duplicate-group-safe split
+    # files. Reusing those immutable split inodes avoids loading millions of
+    # documents into RAM (and avoids making another 12 GB data copy).
+    if (config.paths.cleaned / "deduplicated.jsonl").stat().st_size > 2 * 1024 * 1024 * 1024 and all(
+        (config.paths.splits / f"{split}.jsonl").exists() for split in ("train", "validation", "test")
+    ):
+        return _freeze_snapshot_from_splits(
+            config, name=name, version=version, seed=selected_seed,
+            target=target, known_limitations=known_limitations,
+        )
+
     deduplicated_path = config.paths.cleaned / "deduplicated.jsonl"
     if not deduplicated_path.exists():
         raise ValueError("deduplicated Phase 2 input is missing; run cleaning and deduplication first")
@@ -343,6 +354,69 @@ def freeze_snapshot(
     finally:
         if temporary is not None and temporary.exists():
             shutil.rmtree(temporary)
+
+
+def _freeze_snapshot_from_splits(
+    config: PipelineConfig,
+    *, name: str, version: int, seed: int, target: Path,
+    known_limitations: list[str] | None,
+) -> dict[str, Any]:
+    """Freeze existing large-corpus split files without materializing them."""
+    temporary = Path(tempfile.mkdtemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent))
+    registry = SourceRegistry.load(config.paths)
+    by_source: Counter[str] = Counter(); by_category: Counter[str] = Counter(); by_license: Counter[str] = Counter()
+    by_split: Counter[str] = Counter(); estimated_tokens = 0; samples: dict[str, list[dict[str, Any]]] = {}
+    try:
+        for split in ("train", "validation", "test"):
+            source_path = config.paths.splits / f"{split}.jsonl"
+            destination = temporary / f"{split}_manifest.jsonl"
+            # Atomic split publication means a hard link remains immutable even
+            # if a later pipeline run replaces the source path.
+            os.link(source_path, destination)
+            for value in iter_jsonl(source_path):
+                document = Document.from_dict(value); by_split[split] += 1
+                by_source[document.source_name] += 1; by_category[document.category] += 1; by_license[document.license] += 1
+                estimated_tokens += max(1, (len(document.text.encode("utf-8")) + 3) // 4)
+                if len(samples.setdefault(document.category, [])) < 2:
+                    samples[document.category].append({"document_id": document.document_id, "source_name": document.source_name, "text_preview": document.text[:500]})
+        selected_sources = {source.source_name for source in registry.all_sources() if source.source_name in by_source}
+        source_records = [_source_record(source, by_source[source.source_name]) for source in sorted(registry.all_sources(), key=lambda item: item.source_name) if source.source_name in selected_sources]
+        atomic_write_jsonl(temporary / "source_manifest.jsonl", source_records)
+        license_records = []
+        for license_name, count in sorted(by_license.items()):
+            rule = config.license_policy.require_usable(license_name, local_research_only=config.dataset_mode.local_research_only)
+            evidence = sorted({source.license_evidence_url for source in registry.all_sources() if source.source_name in selected_sources and source.license == license_name})
+            license_records.append({"license": license_name, "status": rule.status, "attribution_required": rule.attribution_required, "document_count": count, "evidence_urls": evidence})
+        atomic_write_jsonl(temporary / "license_manifest.jsonl", license_records)
+        rejection_summary = _summarize_rejections((config.paths.rejected / "ingest.jsonl", config.paths.rejected / "clean.jsonl"))
+        duplicate_summary = {"removed": 0, "exact": 0, "near": 0, "groups": 0, "impact_percent": 0.0}
+        duplicate_path = config.paths.reports / "duplicate_report.jsonl"
+        if duplicate_path.exists():
+            groups: set[str] = set(); duplicates = 0; exact = 0; near = 0
+            for record in iter_jsonl(duplicate_path):
+                duplicates += 1; exact += record.get("duplicate_type") == "exact"; near += record.get("duplicate_type") == "near"; groups.add(str(record.get("duplicate_group_id")))
+            duplicate_summary = {"removed": duplicates, "exact": exact, "near": near, "groups": len(groups), "impact_percent": round(duplicates / max(1, duplicates + sum(by_split.values())) * 100.0, 6)}
+        balance_report_path = config.paths.reports / "balance_report.json"
+        balance_report = json.loads(balance_report_path.read_text(encoding="utf-8")) if balance_report_path.exists() else {"estimated_pre_tokenizer_tokens": estimated_tokens}
+        atomic_write_json(temporary / "rejection_summary.json", rejection_summary)
+        atomic_write_json(temporary / "duplicate_summary.json", duplicate_summary)
+        atomic_write_json(temporary / "balance_report.json", balance_report)
+        dataset_summary = {"schema_version": 1, "raw_documents": None, "cleaned_documents_before_balancing": None, "documents": sum(by_split.values()), "estimated_pre_tokenizer_tokens": estimated_tokens, "exact_candidate_token_counts": {}, "by_split": dict(by_split), "by_source": dict(sorted(by_source.items())), "by_category": dict(sorted(by_category.items())), "by_license": dict(sorted(by_license.items())), "rejection_distribution": rejection_summary, "deduplication_impact": duplicate_summary, "balancing_exclusions": balance_report.get("balancing_exclusions_by_reason", {}), "sensitive_data_detections": rejection_summary["sensitive_data_detections"], "source_concentration_percentages": balance_report.get("source_concentration_percentages", {}), "representative_accepted_samples": samples, "dataset_mode": config.dataset_mode.to_dict(), "token_count_note": "Pre-tokenizer values are provisional estimates, not exact tokenizer counts."}
+        atomic_write_json(temporary / "dataset_summary.json", dataset_summary)
+        limitations = known_limitations or ["Snapshot reuses immutable split-file inodes to avoid a second large data copy.", "Provisional token estimates are not exact production-tokenizer counts.", "This private local-research snapshot is not cleared for public release."]
+        atomic_write_text(temporary / "LOCAL_RESEARCH_ONLY.txt", "LOCAL RESEARCH ONLY\n\nNot cleared for redistribution or public model release.\n")
+        input_hashes = {str(path.relative_to(config.paths.project_root)): sha256_file(path) for path in [config.paths.cleaned / "deduplicated.jsonl", *[config.paths.splits / f"{s}.jsonl" for s in ("train", "validation", "test")]]}
+        output_names = [item for item in SNAPSHOT_FILES if item not in {"checksums.sha256", "snapshot_manifest.json"}]
+        output_hashes = {item: sha256_file(temporary / item) for item in output_names}
+        stable_payload = {"name": name, "version": version, "seed": seed, "input_hashes": input_hashes, "output_hashes": output_hashes}
+        manifest = {"schema_version": 1, "snapshot_name": name, "snapshot_version": version, "creation_timestamp": utc_now(), "git_commit": _git_commit(config.paths.project_root), "pipeline_configuration_hash": _hash_payload(config.pilot_fingerprint_payload()), "seed": seed, "input_hashes": input_hashes, "output_hashes": output_hashes, "snapshot_content_hash": _hash_payload(stable_payload), "accepted_document_count": sum(by_split.values()), "rejected_document_count": rejection_summary["total"], "estimated_token_count": estimated_tokens, "source_distribution": dict(sorted(by_source.items())), "category_distribution": dict(sorted(by_category.items())), "license_distribution": dict(sorted(by_license.items())), "known_limitations": limitations, "production_readiness_status": "pilot_only", "local_research_only": config.dataset_mode.local_research_only, "release_cleared": config.dataset_mode.release_cleared, "production_ready": False, "immutable": True}
+        atomic_write_json(temporary / "snapshot_manifest.json", manifest)
+        checksum_names = [item for item in SNAPSHOT_FILES if item != "checksums.sha256"]
+        atomic_write_text(temporary / "checksums.sha256", "".join(f"{sha256_file(temporary / item)}  {item}\n" for item in checksum_names))
+        os.replace(temporary, target); temporary = None
+        return {"status": "complete", "snapshot": name, "snapshot_version": version, "snapshot_directory": target.name, "path": str(target), "documents": sum(by_split.values()), "estimated_pre_tokenizer_tokens": estimated_tokens, "files": list(SNAPSHOT_FILES)}
+    finally:
+        if temporary is not None and temporary.exists(): shutil.rmtree(temporary)
 
 
 def verify_snapshot(snapshot_directory: Path) -> dict[str, Any]:
