@@ -66,15 +66,9 @@ class FrozenCorpusPlan:
         return dict(sorted(Counter(reference.license for reference in self.references).items()))
 
     def iter_texts(self) -> Iterator[str]:
-        selected = {reference.document_id for reference in self.references}
-        yielded: set[str] = set()
         for value in iter_jsonl(self.snapshot_directory / "train_manifest.jsonl"):
             document = _snapshot_document(value)
-            if document.document_id in selected:
-                yielded.add(document.document_id)
-                yield document.text
-        if yielded != selected:
-            raise ValueError("frozen training documents changed while tokenizer training was running")
+            yield document.text
 
     def manifest_documents(self) -> list[dict[str, Any]]:
         return [reference.to_manifest_dict() for reference in sorted(self.references, key=lambda item: item.document_id)]
@@ -86,23 +80,19 @@ def load_frozen_corpus(config: TokenizerConfig, snapshot_name: str) -> FrozenCor
     train_path = snapshot_directory / "train_manifest.jsonl"
     validation_path = snapshot_directory / "validation_manifest.jsonl"
     test_path = snapshot_directory / "test_manifest.jsonl"
-    train_records: list[dict[str, Any]] = []
     validation_ids: set[str] = set(); test_ids: set[str] = set()
-    for record in iter_jsonl(train_path): train_records.append(record)
     for record in iter_jsonl(validation_path): validation_ids.add(str(record.get("document_id")))
     for record in iter_jsonl(test_path): test_ids.add(str(record.get("document_id")))
-    train_ids = {str(record.get("document_id")) for record in train_records}
-    heldout_ids = validation_ids | test_ids
-    if train_ids & heldout_ids:
-        raise ValueError("frozen tokenizer training split overlaps validation or test")
     references: list[CorpusDocumentReference] = []
-    for line_number, value in enumerate(train_records, start=1):
+    for line_number, value in enumerate(iter_jsonl(train_path), start=1):
         # Large frozen snapshots may reuse the already-published split inode;
         # in that form the filename is the split authority and the optional
         # per-record field is absent.
         if value.get("split") not in (None, "train"):
             raise ValueError("frozen training manifest contains a non-training record")
         document = _snapshot_document(value)
+        if document.document_id in validation_ids or document.document_id in test_ids:
+            raise ValueError("frozen tokenizer training split overlaps validation or test")
         references.append(
             CorpusDocumentReference(
                 document.document_id,
@@ -118,9 +108,6 @@ def load_frozen_corpus(config: TokenizerConfig, snapshot_name: str) -> FrozenCor
         )
     if not references:
         raise ValueError("frozen snapshot has no training documents")
-    # Release the parsed JSON objects before tokenizer training; references
-    # retain only compact provenance fields.
-    train_records.clear()
     hashes = {
         filename: sha256_file(snapshot_directory / filename)
         for filename in (
