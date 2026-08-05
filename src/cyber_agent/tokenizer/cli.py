@@ -14,6 +14,7 @@ from cyber_agent.tokenizer.corpus import validate_training_corpus
 from cyber_agent.tokenizer.evaluator import compare_candidates, evaluate_tokenizer
 from cyber_agent.tokenizer.loader import CyberTokenizer
 from cyber_agent.tokenizer.model_budget import estimate_model_budget
+from cyber_agent.tokenizer.materialize import materialize_snapshot
 from cyber_agent.tokenizer.pilot import (
     compare_snapshot_candidates,
     evaluate_snapshot_candidate,
@@ -47,9 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
     train_pilot = subparsers.add_parser("train-candidates", help="train configured candidates from one frozen snapshot")
     train_pilot.add_argument("--snapshot", required=True)
     train_pilot.add_argument("--vocab-size", type=int, action="append", dest="vocab_sizes")
+    train_pilot.add_argument("--max-training-tokens", type=int)
     train_pilot_alias = subparsers.add_parser("train-pilot-candidates", help="train candidates from a frozen local pilot")
     train_pilot_alias.add_argument("--snapshot", required=True)
     train_pilot_alias.add_argument("--vocab-size", type=int, action="append", dest="vocab_sizes")
+    train_pilot_alias.add_argument("--max-training-tokens", type=int)
 
     evaluate_pilot = subparsers.add_parser("evaluate-candidate", help="evaluate one frozen-snapshot candidate")
     evaluate_pilot.add_argument("--snapshot", required=True)
@@ -92,6 +95,12 @@ def build_parser() -> argparse.ArgumentParser:
     attest.add_argument("--directory", type=Path, required=True)
     attest.add_argument("--signer-identity")
     attest.add_argument("--detached-signature", type=Path)
+    materialize = subparsers.add_parser("materialize", help="stream a frozen snapshot into resumable uint32 token shards")
+    materialize.add_argument("--tokenizer", type=Path, required=True)
+    materialize.add_argument("--snapshot-directory", type=Path, required=True)
+    materialize.add_argument("--output-directory", type=Path, required=True)
+    materialize.add_argument("--shard-tokens", type=int, default=10_000_000)
+    materialize.add_argument("--minimum-free-gib", type=int, default=52)
     return parser
 
 
@@ -126,7 +135,7 @@ def execute(args: argparse.Namespace) -> Any:
             )
         return compare_candidates(config)
     if args.command in {"train-candidates", "train-pilot-candidates"}:
-        return train_snapshot_candidates(config, snapshot_name=args.snapshot, vocabulary_sizes=args.vocab_sizes)
+        return train_snapshot_candidates(config, snapshot_name=args.snapshot, vocabulary_sizes=args.vocab_sizes, maximum_training_tokens=args.max_training_tokens)
     if args.command == "evaluate-candidate":
         return evaluate_snapshot_candidate(config, snapshot_name=args.snapshot, candidate_size=args.candidate)
     if args.command == "compare-candidates":
@@ -186,6 +195,11 @@ def execute(args: argparse.Namespace) -> Any:
             output_path=args.directory.resolve().parent / f"{args.directory.resolve().name}.attestation.json",
         )
         return {"status": "complete", "attestation": str(output), "uploaded": False}
+    if args.command == "materialize":
+        return materialize_snapshot(
+            args.tokenizer, args.snapshot_directory, args.output_directory,
+            shard_tokens=args.shard_tokens, minimum_free_gib=args.minimum_free_gib,
+        )
     raise ValueError(f"unsupported command: {args.command}")
 
 

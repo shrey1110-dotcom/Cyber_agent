@@ -6,6 +6,7 @@ import json
 import math
 import os
 import shutil
+import shutil
 import tempfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -40,6 +41,7 @@ class FrozenCorpusPlan:
     references: tuple[CorpusDocumentReference, ...]
     input_manifest_hashes: dict[str, str]
     excluded_split_counts: dict[str, int]
+    selected_document_ids: frozenset[str] | None = None
 
     @property
     def document_count(self) -> int:
@@ -68,6 +70,8 @@ class FrozenCorpusPlan:
     def iter_texts(self) -> Iterator[str]:
         for value in iter_jsonl(self.snapshot_directory / "train_manifest.jsonl"):
             document = _snapshot_document(value)
+            if self.selected_document_ids is not None and document.document_id not in self.selected_document_ids:
+                continue
             yield document.text
 
     def manifest_documents(self) -> list[dict[str, Any]]:
@@ -131,8 +135,24 @@ def train_snapshot_candidates(
     snapshot_name: str,
     vocabulary_sizes: Iterable[int] | None = None,
     fixture_artifact: bool | None = None,
+    maximum_training_tokens: int | None = None,
 ) -> dict[str, Any]:
     plan = load_frozen_corpus(config, snapshot_name)
+    if maximum_training_tokens is not None:
+        if maximum_training_tokens < 1:
+            raise ValueError("maximum_training_tokens must be positive")
+        selected: list[CorpusDocumentReference] = []
+        total = 0
+        for reference in plan.references:
+            estimate = max(1, (reference.byte_count + 3) // 4)
+            if selected and total + estimate > maximum_training_tokens:
+                break
+            selected.append(reference); total += estimate
+        plan = FrozenCorpusPlan(
+            plan.config, plan.snapshot_directory, plan.snapshot_manifest,
+            tuple(selected), plan.input_manifest_hashes, plan.excluded_split_counts,
+            frozenset(reference.document_id for reference in selected),
+        )
     sizes = tuple(vocabulary_sizes or config.candidate_vocabulary_sizes)
     if not sizes or any(size < 300 for size in sizes):
         raise ValueError("candidate vocabulary sizes must be at least 300")
@@ -140,6 +160,8 @@ def train_snapshot_candidates(
     results: list[dict[str, Any]] = []
     expected_special_ids = {token: index for index, token in enumerate(config.special_tokens)}
     for size in sizes:
+        if shutil.disk_usage(config.project_root).free < 52 * 1024**3:
+            raise RuntimeError("disk safety guard: refusing tokenizer training below 52 GiB free")
         selected = config.with_overrides(vocabulary_size=size)
         backend = Tokenizer(models.BPE(unk_token="<|unk|>", byte_fallback=True))
         backend.normalizer = None
@@ -169,6 +191,7 @@ def train_snapshot_candidates(
                 "snapshot_content_hash": plan.snapshot_manifest["snapshot_content_hash"],
                 "frozen_train_manifest_hash": plan.input_manifest_hashes["train_manifest.jsonl"],
                 "train_only_verified": True,
+                "maximum_training_tokens": maximum_training_tokens,
                 "requested_size_was_fully_produced": backend.get_vocab_size(with_added_tokens=True) == size,
                 "production_ready": False,
                 "local_research_only": bool(plan.snapshot_manifest.get("local_research_only")),
