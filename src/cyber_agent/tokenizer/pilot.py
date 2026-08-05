@@ -97,7 +97,10 @@ def load_frozen_corpus(config: TokenizerConfig, snapshot_name: str) -> FrozenCor
         raise ValueError("frozen tokenizer training split overlaps validation or test")
     references: list[CorpusDocumentReference] = []
     for line_number, value in enumerate(train_records, start=1):
-        if value.get("split") != "train":
+        # Large frozen snapshots may reuse the already-published split inode;
+        # in that form the filename is the split authority and the optional
+        # per-record field is absent.
+        if value.get("split") not in (None, "train"):
             raise ValueError("frozen training manifest contains a non-training record")
         document = _snapshot_document(value)
         references.append(
