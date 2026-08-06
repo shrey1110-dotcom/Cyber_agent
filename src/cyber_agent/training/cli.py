@@ -38,6 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--max-steps", type=int)
     train.add_argument("--evaluation-max-batches", type=int)
     train.add_argument("--resume", type=Path)
+    train.add_argument("--token-shard-directory", type=Path,
+                       help="read pre-tokenized uint32 shards instead of re-tokenizing JSONL")
     train.add_argument(
         "--allow-horizon-extension",
         action="store_true",
@@ -67,6 +69,8 @@ def build_parser() -> argparse.ArgumentParser:
     smoke.add_argument("--steps", type=int, default=2)
     smoke.add_argument("--max-documents", type=int, default=256,
                        help="bounded smoke corpus; never scans the full production snapshot")
+    smoke.add_argument("--token-shard-directory", type=Path,
+                       help="read pre-tokenized uint32 shards instead of re-tokenizing JSONL")
 
     evaluate = subparsers.add_parser("evaluate", help="evaluate a checkpoint on a held-out frozen split")
     evaluate.add_argument("--snapshot", required=True)
@@ -115,6 +119,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         artifacts = TrainingArtifacts.load(
             project_root=root, snapshot_name=args.snapshot, tokenizer_path=args.tokenizer,
             allow_pilot_artifacts=True, document_limit=args.max_documents,
+            token_shard_directory=args.token_shard_directory,
         )
         smoke_config = config.smoke_config(vocabulary_size=artifacts.tokenizer.vocabulary_size, max_steps=args.steps)
         run = PretrainingRun.create(config=smoke_config, artifacts=artifacts, run_name=args.run_name)
@@ -126,7 +131,8 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         if args.allow_horizon_extension and not args.resume:
             raise ValueError("--allow-horizon-extension requires --resume and a new run name")
         artifacts = TrainingArtifacts.load(
-            project_root=root, snapshot_name=args.snapshot, tokenizer_path=args.tokenizer, allow_pilot_artifacts=allow_pilot
+            project_root=root, snapshot_name=args.snapshot, tokenizer_path=args.tokenizer,
+            allow_pilot_artifacts=allow_pilot, token_shard_directory=args.token_shard_directory,
         )
         run = PretrainingRun.create(
             config=config, artifacts=artifacts, run_name=args.run_name,

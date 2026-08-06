@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import array
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +41,7 @@ class TrainingArtifacts:
     validation_manifest_hash: str
     test_manifest_hash: str
     document_limit: int | None = None
+    token_shard_directory: Path | None = None
 
     @classmethod
     def load(
@@ -50,8 +52,15 @@ class TrainingArtifacts:
         tokenizer_path: str | Path,
         allow_pilot_artifacts: bool,
         document_limit: int | None = None,
+        token_shard_directory: str | Path | None = None,
     ) -> "TrainingArtifacts":
         root = project_root.resolve()
+        shard_directory = None
+        if token_shard_directory is not None:
+            shard_directory = _inside(root, Path(token_shard_directory))
+            manifest_path = shard_directory / "materialization_manifest.json"
+            if not manifest_path.exists():
+                raise ValueError(f"token shard manifest is missing: {manifest_path}")
         snapshot_directory = _inside(root, root / "artifacts" / "datasets" / "snapshots" / snapshot_name)
         snapshot = verify_snapshot(snapshot_directory)
         tokenizer_file = _inside(root, Path(tokenizer_path))
@@ -87,6 +96,7 @@ class TrainingArtifacts:
             validation_manifest_hash=sha256_file(validation_path),
             test_manifest_hash=sha256_file(test_path),
             document_limit=document_limit,
+            token_shard_directory=shard_directory,
         )
 
     def provenance(self) -> dict[str, Any]:
@@ -139,6 +149,9 @@ class TrainingArtifacts:
         if sequence_length < 2:
             raise ValueError("sequence_length must be at least two")
         block_size = sequence_length + 1
+        if self.token_shard_directory is not None:
+            yield from self._shard_blocks(split, block_size)
+            return
         carry: list[int] = []
         for record in self._records(split):
             text = str(record["text"])
@@ -149,6 +162,28 @@ class TrainingArtifacts:
             while len(carry) >= block_size:
                 yield carry[:block_size]
                 carry = carry[block_size:]
+
+    def _shard_blocks(self, split: str, block_size: int) -> Iterator[list[int]]:
+        """Stream uint32 token shards without loading a shard or corpus into RAM."""
+        assert self.token_shard_directory is not None
+        manifest = json.loads((self.token_shard_directory / "materialization_manifest.json").read_text())
+        split_info = manifest.get("splits", {}).get(split, {})
+        carry: list[int] = []
+        for item in split_info.get("shards", []):
+            path = self.token_shard_directory / split / str(item["path"])
+            if not path.exists():
+                raise ValueError(f"token shard is missing: {path}")
+            with path.open("rb") as handle:
+                while True:
+                    raw = handle.read(4 * 65536)
+                    if not raw:
+                        break
+                    values = array.array("I")
+                    values.frombytes(raw)
+                    carry.extend(values.tolist())
+                    while len(carry) >= block_size:
+                        yield carry[:block_size]
+                        del carry[:block_size]
 
     def batches(self, split: str, *, sequence_length: int, batch_size: int) -> Iterator[tuple[mx.array, mx.array]]:
         if batch_size < 1:
