@@ -65,6 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
     smoke.add_argument("--tokenizer", type=Path, required=True)
     smoke.add_argument("--run-name", required=True)
     smoke.add_argument("--steps", type=int, default=2)
+    smoke.add_argument("--max-documents", type=int, default=256,
+                       help="bounded smoke corpus; never scans the full production snapshot")
 
     evaluate = subparsers.add_parser("evaluate", help="evaluate a checkpoint on a held-out frozen split")
     evaluate.add_argument("--snapshot", required=True)
@@ -108,8 +110,11 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     if args.command == "smoke-train":
         if args.steps < 1 or args.steps > 10:
             raise ValueError("smoke-train --steps must be between 1 and 10")
+        if args.max_documents < 1 or args.max_documents > 10000:
+            raise ValueError("smoke-train --max-documents must be between 1 and 10000")
         artifacts = TrainingArtifacts.load(
-            project_root=root, snapshot_name=args.snapshot, tokenizer_path=args.tokenizer, allow_pilot_artifacts=True
+            project_root=root, snapshot_name=args.snapshot, tokenizer_path=args.tokenizer,
+            allow_pilot_artifacts=True, document_limit=args.max_documents,
         )
         smoke_config = config.smoke_config(vocabulary_size=artifacts.tokenizer.vocabulary_size, max_steps=args.steps)
         run = PretrainingRun.create(config=smoke_config, artifacts=artifacts, run_name=args.run_name)

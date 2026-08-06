@@ -39,6 +39,7 @@ class TrainingArtifacts:
     train_manifest_hash: str
     validation_manifest_hash: str
     test_manifest_hash: str
+    document_limit: int | None = None
 
     @classmethod
     def load(
@@ -48,6 +49,7 @@ class TrainingArtifacts:
         snapshot_name: str,
         tokenizer_path: str | Path,
         allow_pilot_artifacts: bool,
+        document_limit: int | None = None,
     ) -> "TrainingArtifacts":
         root = project_root.resolve()
         snapshot_directory = _inside(root, root / "artifacts" / "datasets" / "snapshots" / snapshot_name)
@@ -84,6 +86,7 @@ class TrainingArtifacts:
             train_manifest_hash=sha256_file(train_path),
             validation_manifest_hash=sha256_file(validation_path),
             test_manifest_hash=sha256_file(test_path),
+            document_limit=document_limit,
         )
 
     def provenance(self) -> dict[str, Any]:
@@ -113,6 +116,8 @@ class TrainingArtifacts:
         path = self.snapshot_directory / f"{split}_manifest.jsonl"
         seen: set[str] = set()
         for line_number, record in enumerate(read_jsonl(path), start=1):
+            if self.document_limit is not None and len(seen) >= self.document_limit:
+                break
             if record.get("split") != split:
                 raise ValueError(f"{split} manifest has a non-{split} record at line {line_number}")
             document_id = str(record.get("document_id", ""))
