@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
@@ -239,6 +240,8 @@ class PretrainingRun:
         }
 
     def _save(self) -> Path:
+        if shutil.disk_usage(self.config.project_root).free < 52 * 1024**3:
+            raise RuntimeError("disk safety guard: refusing checkpoint below 52 GiB free; resume after cleanup")
         checkpoint = save_checkpoint(
             run_directory=self.run_directory,
             step=self.step,
