@@ -254,6 +254,12 @@ class PretrainingRun:
             self.run_directory / "latest.json",
             {"step": self.step, "checkpoint": str(checkpoint.relative_to(self.run_directory)), "updated_at": utc_now()},
         )
+        # Keep only the newest two immutable checkpoints; older checkpoints are
+        # redundant for resume and can exhaust the user's disk budget.
+        checkpoints = sorted((self.run_directory / "checkpoints").glob("step-*"))
+        for stale in checkpoints[:-2]:
+            import shutil as _shutil
+            _shutil.rmtree(stale)
         return checkpoint
 
     def train(
