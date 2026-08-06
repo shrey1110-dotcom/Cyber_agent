@@ -118,7 +118,10 @@ class TrainingArtifacts:
         for line_number, record in enumerate(read_jsonl(path), start=1):
             if self.document_limit is not None and len(seen) >= self.document_limit:
                 break
-            if record.get("split") != split:
+            # Large immutable snapshots use one manifest per split and omit
+            # the redundant field; the filename is authoritative.  If present,
+            # still reject an explicitly conflicting value.
+            if record.get("split") not in (None, split):
                 raise ValueError(f"{split} manifest has a non-{split} record at line {line_number}")
             document_id = str(record.get("document_id", ""))
             text = record.get("text")
